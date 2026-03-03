@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iris_opencti_module"
+version = "1.0.0"
+description = "IRIS Module – OpenCTI integration for pushing IOCs as STIX observables and indicators"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "baseVISION AG" }]
+requires-python = ">=3.9"
+dependencies = ["pycti>=6.0,<7.0"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/baseVISION/iris-opencti-module"
+Repository = "https://github.com/baseVISION/iris-opencti-module"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iris_opencti_module*"]
+
+[tool.pytest.ini_options]
+testpaths = ["iris_opencti_module/tests"]
+addopts = "-v"
+
+[tool.coverage.run]
+source = ["iris_opencti_module"]
+omit = ["iris_opencti_module/tests/*"]
