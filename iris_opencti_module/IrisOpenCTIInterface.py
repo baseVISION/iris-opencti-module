@@ -310,13 +310,15 @@ class IrisOpenCTIInterface(IrisModuleInterface):
         fail_count = 0
 
         for ioc in iocs:
+            # Cache before the action so the except handler never needs
+            # to touch the (possibly broken) SQLAlchemy session.
+            ioc_val = getattr(ioc, "ioc_value", "unknown") or "unknown"
             try:
                 if action(handler, ioc):
                     success_count += 1
                 else:
                     fail_count += 1
             except Exception as exc:
-                ioc_val = getattr(ioc, "ioc_value", "unknown")
                 msg = f"Unexpected error during {label} for IOC '{ioc_val}': {exc}"
                 self.log.error(msg, exc_info=True)
                 self.message_queue.append(msg)

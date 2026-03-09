@@ -398,6 +398,10 @@ class OpenCTIHandler:
             synced_at=now,
         )
 
+        # Cache the value before the commit so the except handler never
+        # needs to touch the (possibly broken) SQLAlchemy session.
+        ioc_val_str = getattr(ioc, "ioc_value", "?") or "?"
+
         try:
             add_tab_attribute_field(
                 ioc,
@@ -410,7 +414,7 @@ class OpenCTIHandler:
             # Non-critical: don't fail the push because of a UI update
             self.log.warning(
                 "Failed to update enrichment tab for IOC '%s': %s",
-                getattr(ioc, "ioc_value", "?"),
+                ioc_val_str,
                 exc,
             )
 
