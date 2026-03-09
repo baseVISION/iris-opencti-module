@@ -241,19 +241,26 @@ class OpenCTIClient:
             result["error"] = f"Cannot reach OpenCTI server: {exc}"
             return result
 
-        # Step 2: authenticated call – read platform settings
-        # (requires a valid API key; replaces the old get_me() call
-        #  which doesn't exist in pycti 6.9.x)
+        # Step 2: authenticated call – list marking definitions.
+        # We deliberately avoid settings.read() because that requires
+        # "Access to admin functionalities", which Connector accounts
+        # do not have.  Listing marking definitions only needs
+        # "Access knowledge" (the base Connector capability).
         try:
-            settings = self.api.settings.read()
-            if settings:
-                result["authenticated"] = True
-                result["version"] = settings.get(
-                    "platform_version", "unknown"
-                )
-            else:
-                result["error"] = "API key is invalid or has no permissions"
-                return result
+            markings = self.api.marking_definition.list(first=1)
+            # A valid key returns a list (possibly empty); an invalid key
+            # raises an exception with FORBIDDEN_ACCESS.
+            result["authenticated"] = True
+            # Best-effort version: try settings if we happen to have admin
+            # rights, otherwise leave version as None.
+            try:
+                settings = self.api.settings.read()
+                if settings:
+                    result["version"] = settings.get(
+                        "platform_version", "unknown"
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             result["error"] = f"Authentication failed: {exc}"
             return result

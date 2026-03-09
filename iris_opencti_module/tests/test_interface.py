@@ -362,6 +362,28 @@ class TestCreateHandler:
 
         assert result.ok is False
 
+    def test_health_check_failure_returns_i2error(self, MockHandler):
+        """If the handler is created but health_check_detailed fails,
+        _create_handler must return I2Error with a clear message."""
+        handler = MockHandler.return_value
+        handler.client.health_check_detailed.return_value = {
+            "ok": False,
+            "reachable": True,
+            "authenticated": False,
+            "version": None,
+            "error": "Authentication failed: FORBIDDEN_ACCESS",
+        }
+        handler.message_queue = []
+
+        iface = _make_interface()
+
+        with patch.object(iface, "_lookup_cases_for_ioc", return_value=[]):
+            result = iface.hooks_handler("on_postload_ioc_create", "", _make_ioc())
+
+        assert result.ok is False
+        assert "connection check failed" in result.message.lower()
+        assert "authenticated=False" in result.message
+
 
 # ── _lookup_cases_for_ioc ─────────────────────────────────────────────────────
 

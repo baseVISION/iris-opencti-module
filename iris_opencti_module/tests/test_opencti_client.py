@@ -117,23 +117,12 @@ class TestHealthCheckDetailed:
         assert result["reachable"] is False  # treated as not reachable
         assert result["ok"] is False
 
-    def test_reachable_but_authentication_fails_returns_none(self, MockApi):
+    def test_reachable_but_marking_list_raises_fails_auth(self, MockApi):
+        # Auth is now validated by listing marking definitions (connector-level
+        # permission only), NOT settings.read() which requires admin rights.
         api = MockApi.return_value
         api.health_check.return_value = True
-        api.settings.read.return_value = None
-
-        client = _make_client(MockApi)
-        result = client.health_check_detailed()
-
-        assert result["reachable"] is True
-        assert result["authenticated"] is False
-        assert result["ok"] is False
-        assert "invalid" in result["error"].lower() or "permission" in result["error"].lower()
-
-    def test_reachable_but_authentication_raises(self, MockApi):
-        api = MockApi.return_value
-        api.health_check.return_value = True
-        api.settings.read.side_effect = Exception("AUTH_REQUIRED")
+        api.marking_definition.list.side_effect = Exception("FORBIDDEN_ACCESS")
 
         client = _make_client(MockApi)
         result = client.health_check_detailed()
@@ -142,6 +131,23 @@ class TestHealthCheckDetailed:
         assert result["authenticated"] is False
         assert result["ok"] is False
         assert "Authentication" in result["error"]
+
+    def test_settings_read_failure_does_not_break_auth(self, MockApi):
+        # settings.read() is now best-effort only (admin accounts get the
+        # version; connector accounts silently skip it).  A failure here
+        # must NOT cause authenticated=False or ok=False.
+        api = MockApi.return_value
+        api.health_check.return_value = True
+        api.settings.read.side_effect = Exception("ACCESS_DENIED")
+        # marking_definition.list returns a MagicMock by default (truthy, no raise)
+
+        client = _make_client(MockApi)
+        result = client.health_check_detailed()
+
+        assert result["reachable"] is True
+        assert result["authenticated"] is True
+        assert result["ok"] is True
+        assert result["version"] is None  # unavailable but not fatal
 
     def test_version_missing_in_settings(self, MockApi):
         api = MockApi.return_value

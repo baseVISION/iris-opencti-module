@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iris_opencti_module"
-version = "1.0.0"
+version = "1.0.1"
 description = "IRIS Module – OpenCTI integration for pushing IOCs as STIX observables and indicators"
 readme = "README.md"
 license = { file = "LICENSE" }

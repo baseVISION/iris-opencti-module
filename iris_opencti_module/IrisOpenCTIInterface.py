@@ -96,6 +96,11 @@ class IrisOpenCTIInterface(IrisModuleInterface):
         Verify OpenCTI connectivity and credentials during module
         registration.  Logs clear warnings but does NOT prevent hook
         registration — the connection may come up later.
+
+        Note: register_hooks has no return-value path back to the IRIS
+        UI, so failures here only appear in pod/application logs.
+        Connection errors during hook invocations are surfaced via
+        I2Error from _create_handler.
         """
         url = (conf.get("opencti_url") or "").strip()
         api_key = (conf.get("opencti_api_key") or "").strip()
@@ -139,8 +144,6 @@ class IrisOpenCTIInterface(IrisModuleInterface):
                 status["reachable"],
                 status["authenticated"],
             )
-
-    # ── Hook dispatcher ─────────────────────────────────────────
 
     def hooks_handler(
         self,
@@ -251,7 +254,6 @@ class IrisOpenCTIInterface(IrisModuleInterface):
                 mod_config=self._dict_conf,
                 logger=self.log,
             )
-            return handler
         except OpenCTIClientError as exc:
             msg = f"OpenCTI connection failed: {exc}"
             self.log.error(msg)
@@ -270,6 +272,27 @@ class IrisOpenCTIInterface(IrisModuleInterface):
                 logs=list(self.message_queue),
                 message=msg,
             )
+
+        # Validate connectivity using the handler's already-created
+        # client — no extra connection, but surfaces errors in the
+        # IRIS task log (the only UI path for IrisInterfaceStatus).
+        status = handler.client.health_check_detailed()
+        if not status["ok"]:
+            msg = (
+                f"OpenCTI connection check failed — "
+                f"{status.get('error', 'unknown error')} "
+                f"(reachable={status['reachable']}, "
+                f"authenticated={status['authenticated']})"
+            )
+            self.log.error(msg)
+            self.message_queue.append(msg)
+            return IrisInterfaceStatus.I2Error(
+                data=data,
+                logs=list(self.message_queue),
+                message=msg,
+            )
+
+        return handler
 
     def _iterate_iocs(
         self,

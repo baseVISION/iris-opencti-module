@@ -8,7 +8,7 @@ IRIS UI under Manage → Modules → IrisOpenCTI.
 module_name = "IrisOpenCTI"
 module_description = "Pushes IRIS IOCs to OpenCTI as observables and indicators, linked to Case Incidents"
 interface_version = "1.2.0"
-module_version = "1.0.0"
+module_version = "1.0.1"
 
 pipeline_support = False
 pipeline_info = {}
