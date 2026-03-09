@@ -2206,3 +2206,137 @@ class TestExtractCustomAttribute:
         case = _make_case(custom_attributes={"Section": {"X": {"value": "y"}}})
         result = OpenCTIHandler._extract_custom_attribute(case, "")
         assert result is None
+
+
+# ════════════════════════════════════════════════════════════════
+# External reference on Case Incident
+# ════════════════════════════════════════════════════════════════
+
+@patch("iris_opencti_module.opencti_handler.opencti_handler.OpenCTIClient")
+class TestCaseExternalReference:
+
+    def test_external_ref_added_when_iris_url_configured(self, MockClient):
+        """When opencti_iris_url is set, an external reference should
+        be attached to the Case Incident linking back to the IRIS case."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-er-1"}
+        client.find_or_create_case_incident.return_value = {"id": "octi-c-er"}
+        client.link_to_case.return_value = True
+        client.add_case_external_reference.return_value = True
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_iris_url="https://iris.local:8443"),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="ref.test.com", type_name="domain")
+        case = _make_case(case_id=77, name="IRIS Case 77")
+
+        handler.handle_ioc(ioc, cases_info=[case])
+
+        client.add_case_external_reference.assert_called_once_with(
+            case_id="octi-c-er",
+            source_name="IRIS DFIR",
+            url="https://iris.local:8443/case/ioc?cid=77",
+            description="IRIS Case 77",
+            external_id="77",
+        )
+
+    def test_external_ref_skipped_when_no_iris_url(self, MockClient):
+        """When opencti_iris_url is empty, no external reference should
+        be created."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-er-2"}
+        client.find_or_create_case_incident.return_value = {"id": "octi-c-er2"}
+        client.link_to_case.return_value = True
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(),  # no opencti_iris_url
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="noref.test.com", type_name="domain")
+        case = _make_case(case_id=88, name="Case 88")
+
+        handler.handle_ioc(ioc, cases_info=[case])
+
+        client.add_case_external_reference.assert_not_called()
+
+    def test_external_ref_uses_resolved_case_name(self, MockClient):
+        """External reference description should use the same resolved
+        case name (e.g. custom_prefix_id mode)."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-er-3"}
+        client.find_or_create_case_incident.return_value = {"id": "octi-c-er3"}
+        client.link_to_case.return_value = True
+        client.add_case_external_reference.return_value = True
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(
+                opencti_iris_url="https://iris.corp",
+                opencti_case_naming_mode="custom_prefix_id",
+                opencti_case_name_prefix="IR-2025",
+            ),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="prefix.test.com", type_name="domain")
+        case = _make_case(case_id=99, name="Ignored Name")
+
+        handler.handle_ioc(ioc, cases_info=[case])
+
+        call_kwargs = client.add_case_external_reference.call_args[1]
+        assert call_kwargs["description"] == "IR-2025-99"
+        assert call_kwargs["url"] == "https://iris.corp/case/ioc?cid=99"
+
+    def test_external_ref_with_multiple_cases(self, MockClient):
+        """Each case should get its own external reference."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-er-4"}
+        client.find_or_create_case_incident.side_effect = [
+            {"id": "octi-mc-1"},
+            {"id": "octi-mc-2"},
+        ]
+        client.link_to_case.return_value = True
+        client.add_case_external_reference.return_value = True
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_iris_url="https://iris.local"),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="multi.ref.com", type_name="domain")
+        cases = [
+            _make_case(case_id=1, name="Case A"),
+            _make_case(case_id=2, name="Case B"),
+        ]
+
+        handler.handle_ioc(ioc, cases_info=cases)
+
+        assert client.add_case_external_reference.call_count == 2
+
+    def test_external_ref_trailing_slash_stripped(self, MockClient):
+        """Trailing slash on IRIS URL should be stripped."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-er-5"}
+        client.find_or_create_case_incident.return_value = {"id": "octi-c-ts"}
+        client.link_to_case.return_value = True
+        client.add_case_external_reference.return_value = True
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_iris_url="https://iris.local:8443/"),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="slash.test.com", type_name="domain")
+        case = _make_case(case_id=5, name="Case Slash")
+
+        handler.handle_ioc(ioc, cases_info=[case])
+
+        call_kwargs = client.add_case_external_reference.call_args[1]
+        assert call_kwargs["url"] == "https://iris.local:8443/case/ioc?cid=5"

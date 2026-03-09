@@ -130,7 +130,7 @@ All settings are in the IRIS UI under **Manage → Modules → IrisOpenCTI**.
 | Default TLP | `amber` | Fallback TLP: `clear`, `green`, `amber`, `amber+strict`, `red` |
 | Author organization | *(empty)* | "Created by" identity in OpenCTI |
 | Default confidence | `50` | Confidence level 0–100 |
-| Include case description | `true` | Copy IRIS case description to OpenCTI |
+| IRIS base URL | *(empty)* | Link back to IRIS IOC page on OpenCTI Case Incidents |
 
 ### Case Naming
 
@@ -140,6 +140,8 @@ All settings are in the IRIS UI under **Manage → Modules → IrisOpenCTI**.
 | `case_id` | `IRIS-Case-{id}` |
 | `custom_prefix_id` | `{prefix}-{id}` |
 | `custom_attribute` | Value of a custom case attribute (e.g. `CSIRT Case ID`) |
+
+Additionally, **Include case description** (`true` by default) controls whether the IRIS case description is copied to the OpenCTI Case Incident.
 
 ## IOC Type Mapping
 
@@ -194,7 +196,7 @@ export OPENCTI_TOKEN=<your-api-key>
 buildnpush2iris.sh                     # Build wheel + deploy to local containers (Podman/Docker)
 iris_opencti_module/
 ├── __init__.py
-├── IrisOpenCTIConfig.py           # Configuration schema (18 params)
+├── IrisOpenCTIConfig.py           # Configuration schema (19 params)
 ├── IrisOpenCTIInterface.py        # Hook registration and dispatch
 └── opencti_handler/
     ├── opencti_handler.py         # 7-step IOC push pipeline

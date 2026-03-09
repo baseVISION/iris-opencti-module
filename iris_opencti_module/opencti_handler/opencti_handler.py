@@ -90,6 +90,7 @@ class OpenCTIHandler:
         self._case_name_prefix = self.config.get("opencti_case_name_prefix", "IRIS-Case")
         self._case_custom_attr = self.config.get("opencti_case_custom_attribute", "").strip().strip("'\"")
         self._case_desc_enabled = bool(self.config.get("opencti_case_description_enabled", True))
+        self._iris_url = (self.config.get("opencti_iris_url", "") or "").strip().rstrip("/")
         self._is_manual = False  # set to True for manual triggers
 
     # ── Public entry point ──────────────────────────────────────
@@ -237,6 +238,15 @@ class OpenCTIHandler:
                         successfully_synced_case_ids.add(str(iris_cid))
                     # OpenCTI UUID needed for delete-vs-unlink decision
                     self._store_synced_case_opencti_id(ioc, case_id)
+                    # Add external reference back to IRIS case
+                    if self._iris_url and iris_cid is not None:
+                        self.client.add_case_external_reference(
+                            case_id=case_id,
+                            source_name="IRIS DFIR",
+                            url=f"{self._iris_url}/case/ioc?cid={iris_cid}",
+                            description=case_name,
+                            external_id=str(iris_cid),
+                        )
 
         # ── Step 6: tag the IOC and store push metadata ─────────
         self._add_tag(ioc, _PUSHED_TAG)

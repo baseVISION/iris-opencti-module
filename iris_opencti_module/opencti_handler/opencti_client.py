@@ -743,6 +743,51 @@ class OpenCTIClient:
             )
             return False
 
+    def add_case_external_reference(
+        self,
+        case_id: str,
+        source_name: str,
+        url: str,
+        description: str = "",
+        external_id: str = "",
+    ) -> bool:
+        """
+        Create an external reference and attach it to a Case Incident.
+
+        Uses ``update=True`` so re-pushing with the same URL upserts
+        rather than duplicating.
+
+        Returns True on success, False on failure.
+        """
+        try:
+            ref = self.api.external_reference.create(
+                source_name=source_name,
+                url=url,
+                description=description,
+                external_id=external_id,
+                update=True,
+            )
+            if not ref or not ref.get("id"):
+                self.log.warning(
+                    "External reference creation returned no ID for case %s",
+                    case_id,
+                )
+                return False
+
+            self.api.stix_domain_object.add_external_reference(
+                id=case_id,
+                external_reference_id=ref["id"],
+            )
+            self.log.info(
+                "Attached external reference '%s' to case %s", url, case_id,
+            )
+            return True
+        except Exception as exc:
+            self.log.warning(
+                "Failed to add external reference to case %s: %s", case_id, exc,
+            )
+            return False
+
     def unlink_from_case(self, case_id: str, object_id: str) -> bool:
         """
         Remove an observable from a Case Incident without deleting it.

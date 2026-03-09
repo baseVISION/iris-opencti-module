@@ -8,7 +8,7 @@ IRIS UI under Manage → Modules → IrisOpenCTI.
 module_name = "IrisOpenCTI"
 module_description = "Pushes IRIS IOCs to OpenCTI as observables and indicators, linked to Case Incidents"
 interface_version = "1.2.0"
-module_version = "1.0.2"
+module_version = "1.0.3"
 
 pipeline_support = False
 pipeline_info = {}
@@ -143,6 +143,17 @@ module_configuration = [
         "default": 50,
         "mandatory": False,
         "type": "int",
+        "section": "Behavior",
+    },
+    {
+        "param_name": "opencti_iris_url",
+        "param_human_name": "IRIS base URL",
+        "param_description": "Base URL of the IRIS instance (e.g. https://iris.example.com:8443). "
+                             "Used to create an external reference link on OpenCTI Case Incidents "
+                             "pointing to the IRIS IOC overview page. Leave empty to skip.",
+        "default": "",
+        "mandatory": False,
+        "type": "string",
         "section": "Behavior",
     },
     # ── Case Naming ─────────────────────────────────────────────
