@@ -170,15 +170,39 @@ class IrisOpenCTIInterface(IrisModuleInterface):
                 message="Configuration error",
             )
 
-        if hook_name in (
-            "on_postload_ioc_create",
-            "on_postload_ioc_update",
-            "on_manual_trigger_ioc",
-        ):
-            is_manual = hook_name == "on_manual_trigger_ioc"
-            return self._handle_iocs(data, is_manual=is_manual)
+        conf = self._dict_conf
+
+        if hook_name == "on_postload_ioc_create":
+            if not conf.get("opencti_on_create_hook_enabled", True):
+                self.log.info(
+                    "on_postload_ioc_create fired but push-on-create is disabled — skipping"
+                )
+                return IrisInterfaceStatus.I2Success(
+                    data=data, logs=list(self.message_queue)
+                )
+            return self._handle_iocs(data, is_manual=False)
+
+        if hook_name == "on_postload_ioc_update":
+            if not conf.get("opencti_on_update_hook_enabled", True):
+                self.log.info(
+                    "on_postload_ioc_update fired but push-on-update is disabled — skipping"
+                )
+                return IrisInterfaceStatus.I2Success(
+                    data=data, logs=list(self.message_queue)
+                )
+            return self._handle_iocs(data, is_manual=False)
+
+        if hook_name == "on_manual_trigger_ioc":
+            return self._handle_iocs(data, is_manual=True)
 
         if hook_name == "on_preload_ioc_delete":
+            if not conf.get("opencti_on_delete_hook_enabled", True):
+                self.log.info(
+                    "on_preload_ioc_delete fired but delete-on-removal is disabled — skipping"
+                )
+                return IrisInterfaceStatus.I2Success(
+                    data=data, logs=list(self.message_queue)
+                )
             return self._handle_ioc_deletes(data)
 
         self.log.warning("Unhandled hook: %s", hook_name)

@@ -205,7 +205,15 @@ class TestHooksHandlerDispatch:
         handler.handle_ioc_delete.return_value = True
         handler.message_queue = []
 
-        iface = _make_interface()
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": True,
+            "opencti_on_update_hook_enabled": True,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": True,
+        })
         ioc = _make_ioc()
 
         result = iface.hooks_handler("on_preload_ioc_delete", "Delete IOC", ioc)
@@ -219,7 +227,15 @@ class TestHooksHandlerDispatch:
         handler.handle_ioc_delete.return_value = True
         handler.message_queue = []
 
-        iface = _make_interface()
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": True,
+            "opencti_on_update_hook_enabled": True,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": True,
+        })
         ioc = _make_ioc()
 
         with patch.object(iface, "_resolve_ioc_by_id", return_value=ioc) as mock_resolve:
@@ -261,6 +277,96 @@ class TestHooksHandlerDispatch:
 
         assert result.ok is False
         MockHandler.return_value.handle_ioc.assert_not_called()
+
+    def test_create_hook_skipped_when_disabled_in_config(self, MockHandler):
+        """If opencti_on_create_hook_enabled=False the hook fires but does nothing."""
+        handler = MockHandler.return_value
+        handler.handle_ioc.return_value = True
+        handler.message_queue = []
+
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": False,
+            "opencti_on_update_hook_enabled": True,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": False,
+        })
+        ioc = _make_ioc()
+
+        result = iface.hooks_handler("on_postload_ioc_create", "", ioc)
+
+        assert result.ok is True
+        handler.handle_ioc.assert_not_called()
+
+    def test_update_hook_skipped_when_disabled_in_config(self, MockHandler):
+        """If opencti_on_update_hook_enabled=False the hook fires but does nothing."""
+        handler = MockHandler.return_value
+        handler.handle_ioc.return_value = True
+        handler.message_queue = []
+
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": True,
+            "opencti_on_update_hook_enabled": False,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": False,
+        })
+        ioc = _make_ioc()
+
+        result = iface.hooks_handler("on_postload_ioc_update", "", ioc)
+
+        assert result.ok is True
+        handler.handle_ioc.assert_not_called()
+
+    def test_delete_hook_skipped_when_disabled_in_config(self, MockHandler):
+        """If opencti_on_delete_hook_enabled=False the hook fires but does nothing."""
+        handler = MockHandler.return_value
+        handler.handle_ioc_delete.return_value = True
+        handler.message_queue = []
+
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": True,
+            "opencti_on_update_hook_enabled": True,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": False,
+        })
+        ioc = _make_ioc()
+
+        result = iface.hooks_handler("on_preload_ioc_delete", "", ioc)
+
+        assert result.ok is True
+        handler.handle_ioc_delete.assert_not_called()
+
+    def test_manual_trigger_always_runs_regardless_of_create_flag(self, MockHandler):
+        """Manual trigger is never gated by create/update flags."""
+        handler = MockHandler.return_value
+        handler.handle_ioc.return_value = True
+        handler.message_queue = []
+
+        iface = _make_interface({
+            "opencti_url": "https://opencti.test",
+            "opencti_api_key": "tok",
+            "opencti_ssl_verify": True,
+            "opencti_on_create_hook_enabled": False,
+            "opencti_on_update_hook_enabled": False,
+            "opencti_manual_hook_enabled": True,
+            "opencti_on_delete_hook_enabled": False,
+        })
+        ioc = _make_ioc()
+
+        with patch.object(iface, "_lookup_cases_for_ioc", return_value=[]):
+            result = iface.hooks_handler("on_manual_trigger_ioc", "Sync to OpenCTI", ioc)
+
+        assert result.ok is True
+        handler.handle_ioc.assert_called_once()
+        assert handler._is_manual is True
 
 
 # ── _iterate_iocs: list vs single IOC, success/failure counting ───────────────
