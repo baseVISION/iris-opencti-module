@@ -496,6 +496,37 @@ class TestGetObservableEnrichment:
 
         assert result is None
 
+    def test_pycti_returns_empty_list_gives_none(self, MockApi):
+        """pycti can return [] instead of None — must be treated as not-found."""
+        api = MockApi.return_value
+        api.stix_cyber_observable.read.return_value = []
+
+        client = _make_client(MockApi)
+        result = client.get_observable_enrichment("obs-list-empty")
+
+        assert result is None
+
+    def test_pycti_returns_list_uses_first_element(self, MockApi):
+        """pycti can return a single-element list — must unwrap and normalise."""
+        raw = self._raw()
+        api = MockApi.return_value
+        api.stix_cyber_observable.read.return_value = [raw]
+        api.query.return_value = {
+            "data": {
+                "stixCoreObject": {
+                    "containers": {"edges": []},
+                    "stixCoreRelationships": {"edges": []},
+                    "stixSightingRelationships": {"edges": []},
+                }
+            }
+        }
+        client = _make_client(MockApi)
+        result = client.get_observable_enrichment("obs-norm-1")
+
+        assert result is not None
+        assert result["id"] == "obs-norm-1"
+        assert result["value"] == "evil.com"
+
     def test_pycti_raises_gives_none(self, MockApi):
         api = MockApi.return_value
         api.stix_cyber_observable.read.side_effect = Exception("timeout")

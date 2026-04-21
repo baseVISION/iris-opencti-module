@@ -336,6 +336,9 @@ class OpenCTIClient:
         """
         try:
             raw = self.api.stix_cyber_observable.read(id=observable_id)
+            # pycti can return a list in some versions — take the first element
+            if isinstance(raw, list):
+                raw = raw[0] if raw else None
             if not raw:
                 return None
         except Exception as exc:

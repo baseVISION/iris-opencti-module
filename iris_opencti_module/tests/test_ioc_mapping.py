@@ -52,6 +52,21 @@ class TestResolveIocType:
         result = resolve_ioc_type("full-url")
         assert result is not None
 
+    def test_unknown_hash_heuristic_falls_back_to_text(self):
+        """An unknown 'hash'-containing type must fall back to Text.value, not SHA-256.
+        Sending arbitrary strings as SHA-256 causes OpenCTI FUNCTIONAL_ERROR."""
+        result = resolve_ioc_type("custom-hash")
+        assert result is not None
+        assert result["strategy"] == "simple"
+        assert result["key"] == "Text.value"
+
+    def test_sha_prefix_heuristic_falls_back_to_text(self):
+        """Unknown sha-prefixed types (e.g. sha999) must NOT map to the SHA-256 observable."""
+        result = resolve_ioc_type("sha999")
+        assert result is not None
+        assert result["strategy"] == "simple"
+        assert result["key"] == "Text.value"
+
 
 # ── _detect_ip_version ──────────────────────────────────────────
 

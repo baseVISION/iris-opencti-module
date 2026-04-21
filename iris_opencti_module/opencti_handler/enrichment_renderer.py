@@ -120,8 +120,13 @@ def render_enrichment_html(
         _render_summary_table(enrichments, case_names, tlp_name, synced_at),
     ]
 
+    # Sanitise the configured URL before embedding it in any href.
+    # An admin-supplied javascript: or data: URL would otherwise be
+    # stored as a clickable link in every IOC enrichment tab (stored XSS).
+    safe_url = opencti_url if _is_safe_url(opencti_url) else ""
+
     for i, obs in enumerate(enrichments, 1):
-        parts.append(_render_observable_card(obs, i, opencti_url))
+        parts.append(_render_observable_card(obs, i, safe_url))
 
     return "\n".join(parts)
 
@@ -218,10 +223,12 @@ def _render_observable_card(obs: dict, index: int, opencti_url: str) -> str:
     if labels:
         label_html = " ".join(
             f'<span class="octi-badge" '
-            f'style="background:{_esc(lb.get("color", "#555"))}">{_esc(lb["value"])}</span>'
+            f'style="background:{_esc(lb.get("color", "#555"))}">{_esc(lb.get("value", ""))}</span>'
             for lb in labels
+            if lb.get("value")
         )
-        detail_rows.append(("Labels", label_html))
+        if label_html:
+            detail_rows.append(("Labels", label_html))
 
     # Indicators
     if indicators:

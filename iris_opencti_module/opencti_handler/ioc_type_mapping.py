@@ -377,7 +377,7 @@ def resolve_ioc_type(type_name: str) -> dict[str, Any] | None:
     if "url" in lower:
         return IOC_TYPE_MAP["url"]
     if "hash" in lower or lower.startswith("sha"):
-        return IOC_TYPE_MAP["sha256"]  # safe fallback
+        return IOC_TYPE_MAP["text"]  # safe fallback — unknown hash formats fail OpenCTI strict validation
 
     return None
 

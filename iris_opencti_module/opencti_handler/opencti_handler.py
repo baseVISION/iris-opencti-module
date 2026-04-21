@@ -78,20 +78,24 @@ class OpenCTIHandler:
         self._author_id = self.client.resolve_or_create_author(
             self.config.get("opencti_author_name", "")
         )
-        self._default_tlp = self.config.get("opencti_default_tlp", "amber")
+        self._parse_config(mod_config)
+        self._is_manual = False  # set to True for manual triggers
+
+    def _parse_config(self, config: dict[str, Any]) -> None:
+        """Extract and validate module configuration parameters."""
+        self._default_tlp = config.get("opencti_default_tlp", "amber")
         try:
-            self._confidence = max(0, min(100, int(self.config.get("opencti_confidence", 50))))
+            self._confidence = max(0, min(100, int(config.get("opencti_confidence", 50))))
         except (ValueError, TypeError):
             self.log.warning("Invalid confidence value in config, defaulting to 50")
             self._confidence = 50
-        self._create_indicator = bool(self.config.get("opencti_create_indicator", True))
-        self._create_case = bool(self.config.get("opencti_create_case_incident", True))
-        self._case_naming_mode = self.config.get("opencti_case_naming_mode", "case_name")
-        self._case_name_prefix = self.config.get("opencti_case_name_prefix", "IRIS-Case")
-        self._case_custom_attr = self.config.get("opencti_case_custom_attribute", "").strip().strip("'\"")
-        self._case_desc_enabled = bool(self.config.get("opencti_case_description_enabled", True))
-        self._iris_url = (self.config.get("opencti_iris_url", "") or "").strip().rstrip("/")
-        self._is_manual = False  # set to True for manual triggers
+        self._create_indicator = bool(config.get("opencti_create_indicator", True))
+        self._create_case = bool(config.get("opencti_create_case_incident", True))
+        self._case_naming_mode = config.get("opencti_case_naming_mode", "case_name")
+        self._case_name_prefix = config.get("opencti_case_name_prefix", "IRIS-Case")
+        self._case_custom_attr = config.get("opencti_case_custom_attribute", "").strip().strip("'\"")
+        self._case_desc_enabled = bool(config.get("opencti_case_description_enabled", True))
+        self._iris_url = (config.get("opencti_iris_url", "") or "").strip().rstrip("/")
 
     # ── Public entry point ──────────────────────────────────────
 
@@ -188,19 +192,7 @@ class OpenCTIHandler:
         desired_tlp_id = marking_ids[0] if marking_ids else None
         stored_tlp = self._get_push_tlp(ioc)
         tlp_changed = tlp_name != stored_tlp
-        created_ids: list[str] = []
-        for obs_kwargs in obs_param_list:
-            result = self.client.create_observable(**obs_kwargs)
-            if result and result.get("id"):
-                obs_id = result["id"]
-                created_ids.append(obs_id)
-                obs_value = obs_kwargs.get("simple_observable_value", str(obs_kwargs.get("observableData", "")))
-                msg = f"Created observable in OpenCTI: {obs_value} (id={obs_id})"
-                self.log.info(msg)
-                self.message_queue.append(msg)
-                # Upsert does not replace marking edges — only do it when TLP changed
-                if tlp_changed:
-                    self.client.replace_tlp_marking(obs_id, desired_tlp_id)
+        created_ids = self._create_observables(obs_param_list, desired_tlp_id, tlp_changed)
 
         if not created_ids:
             msg = f"Failed to create any observable for IOC '{ioc_value}'"
@@ -210,43 +202,9 @@ class OpenCTIHandler:
             return False
 
         # ── Step 5: link to Case Incident(s) ─────────────────────
-        linked_case_names: list[str] = []
-        successfully_synced_case_ids: set[str] = set()
-        if self._create_case and cases_info:
-            for case_obj in cases_info:
-                case_name = self._resolve_case_name(case_obj)
-                case_desc = self._resolve_case_description(case_obj)
-
-                case = self.client.find_or_create_case_incident(
-                    name=case_name,
-                    description=case_desc,
-                    author_id=self._author_id,
-                    marking_ids=marking_ids,
-                    confidence=self._confidence,
-                )
-                if case and case.get("id"):
-                    case_id = case["id"]
-                    for obj_id in created_ids:
-                        self.client.link_to_case(case_id, obj_id)
-                    msg = f"Linked {len(created_ids)} observable(s) to Case Incident '{case_name}'"
-                    self.log.info(msg)
-                    self.message_queue.append(msg)
-                    linked_case_names.append(case_name)
-                    # Track both the IRIS case ID and the OpenCTI UUID
-                    iris_cid = getattr(case_obj, "case_id", None) or getattr(case_obj, "id", None)
-                    if iris_cid is not None:
-                        successfully_synced_case_ids.add(str(iris_cid))
-                    # OpenCTI UUID needed for delete-vs-unlink decision
-                    self._store_synced_case_opencti_id(ioc, case_id)
-                    # Add external reference back to IRIS case
-                    if self._iris_url and iris_cid is not None:
-                        self.client.add_case_external_reference(
-                            case_id=case_id,
-                            source_name="IRIS DFIR",
-                            url=f"{self._iris_url}/case/ioc?cid={iris_cid}",
-                            description=case_name,
-                            external_id=str(iris_cid),
-                        )
+        linked_case_names, successfully_synced_case_ids = self._link_cases_to_observables(
+            ioc, created_ids, cases_info, marking_ids
+        )
 
         # ── Step 6: tag the IOC and store push metadata ─────────
         self._add_tag(ioc, _PUSHED_TAG)
@@ -267,6 +225,77 @@ class OpenCTIHandler:
         return True
 
     # ── Internal helpers ────────────────────────────────────────
+
+    def _create_observables(
+        self,
+        obs_param_list: list[dict[str, Any]],
+        desired_tlp_id: str | None,
+        tlp_changed: bool,
+    ) -> list[str]:
+        """Create observables in OpenCTI and return a list of created IDs."""
+        created_ids: list[str] = []
+        for obs_kwargs in obs_param_list:
+            result = self.client.create_observable(**obs_kwargs)
+            if result and result.get("id"):
+                obs_id = result["id"]
+                created_ids.append(obs_id)
+                obs_value = obs_kwargs.get("simple_observable_value", str(obs_kwargs.get("observableData", "")))
+                msg = f"Created observable in OpenCTI: {obs_value} (id={obs_id})"
+                self.log.info(msg)
+                self.message_queue.append(msg)
+                if tlp_changed:
+                    self.client.replace_tlp_marking(obs_id, desired_tlp_id)
+        return created_ids
+
+    def _link_cases_to_observables(
+        self,
+        ioc: Any,
+        created_ids: list[str],
+        cases_info: list[Any],
+        marking_ids: list[str],
+    ) -> tuple[list[str], set[str]]:
+        """
+        Create / find Case Incidents and link observables to them.
+
+        Returns a tuple of (linked_case_names, successfully_synced_iris_case_ids).
+        """
+        linked_case_names: list[str] = []
+        successfully_synced_case_ids: set[str] = set()
+        if not self._create_case or not cases_info:
+            return linked_case_names, successfully_synced_case_ids
+
+        for case_obj in cases_info:
+            case_name = self._resolve_case_name(case_obj)
+            case_desc = self._resolve_case_description(case_obj)
+
+            case = self.client.find_or_create_case_incident(
+                name=case_name,
+                description=case_desc,
+                author_id=self._author_id,
+                marking_ids=marking_ids,
+                confidence=self._confidence,
+            )
+            if case and case.get("id"):
+                case_id = case["id"]
+                for obj_id in created_ids:
+                    self.client.link_to_case(case_id, obj_id)
+                msg = f"Linked {len(created_ids)} observable(s) to Case Incident '{case_name}'"
+                self.log.info(msg)
+                self.message_queue.append(msg)
+                linked_case_names.append(case_name)
+                iris_cid = getattr(case_obj, "case_id", None) or getattr(case_obj, "id", None)
+                if iris_cid is not None:
+                    successfully_synced_case_ids.add(str(iris_cid))
+                self._store_synced_case_opencti_id(ioc, case_id)
+                if self._iris_url and iris_cid is not None:
+                    self.client.add_case_external_reference(
+                        case_id=case_id,
+                        source_name="IRIS DFIR",
+                        url=f"{self._iris_url}/case/ioc?cid={iris_cid}",
+                        description=case_name,
+                        external_id=str(iris_cid),
+                    )
+        return linked_case_names, successfully_synced_case_ids
 
     def _resolve_tlp_name(self, ioc: Any) -> str:
         """
@@ -292,6 +321,16 @@ class OpenCTIHandler:
             match = _TLP_TAG_RE.search(tags)
             if match:
                 return match.group(1).lower()
+            # Warn if there is a tlp: tag that didn't match accepted values
+            # (e.g. a typo like tlp:ambr) so analysts aren't silently surprised.
+            if re.search(r"\btlp:", tags, re.IGNORECASE):
+                self.log.warning(
+                    "IOC '%s' has a tlp: tag that does not match a known TLP "
+                    "level — falling back to default TLP '%s'. "
+                    "Check the tag value in IRIS.",
+                    getattr(ioc, "ioc_value", "unknown"),
+                    self._default_tlp,
+                )
 
         # Priority 3: config default
         return self._default_tlp
@@ -314,8 +353,8 @@ class OpenCTIHandler:
             if value:
                 return value
             self.log.warning(
-                "Custom attribute '%s' is empty for case %s — falling back to IRIS-Case-{id}",
-                self._case_custom_attr, case_id,
+                "Custom attribute '%s' is empty for case %s — falling back to IRIS-Case-%s",
+                self._case_custom_attr, case_id, case_id,
             )
             return f"IRIS-Case-{case_id}"
         else:
@@ -428,9 +467,46 @@ class OpenCTIHandler:
                 exc,
             )
 
+        self._ensure_internal_description_field(ioc)
+
+    def _ensure_internal_description_field(self, ioc: Any) -> None:
+        """
+        Add an editable "Internal Description" text field to the IOC's
+        custom attributes the first time this IOC is processed.
+
+        The field lives under the "Internal" tab in the IRIS IOC edit
+        dialog and is **never** read or pushed to OpenCTI — it is purely
+        for analyst-entered notes that must remain within IRIS.
+
+        ``add_tab_attribute_field`` always overwrites, so we check for
+        the field's existence first and skip the call if it is already
+        present (i.e. the analyst may have written content there).
+        """
+        if add_tab_attribute_field is None:
+            return
+
+        custom_attrs = getattr(ioc, "custom_attributes", None) or {}
+        if "Internal Description" in custom_attrs.get("Internal", {}):
+            return  # field already exists — preserve analyst content
+
+        ioc_val_str = getattr(ioc, "ioc_value", "?") or "?"
+        try:
+            add_tab_attribute_field(
+                ioc,
+                tab_name="Internal",
+                field_name="Internal Description",
+                field_type="input_textfield",
+                field_value="",
+            )
+        except Exception as exc:
+            self.log.warning(
+                "Failed to add Internal Description field for IOC '%s': %s",
+                ioc_val_str,
+                exc,
+            )
+
     @staticmethod
-    def _render_enrichment_html(
-        enrichments: list[dict],
+    def _render_enrichment_html(        enrichments: list[dict],
         opencti_url: str,
         case_names: list[str],
         tlp_name: str,
@@ -453,26 +529,25 @@ class OpenCTIHandler:
     def _add_tag(ioc: Any, tag: str) -> None:
         """
         Append a tag to the IOC's ``ioc_tags`` string if not already
-        present.  Modifies the IOC object in-place; IRIS will commit
-        the change since postload hooks receive managed objects.
+        present.  Uses exact token matching to avoid false positives
+        from substrings (e.g. ``opencti:pushed-extra`` ≠ ``opencti:pushed``).
+        Modifies the IOC object in-place; IRIS will commit the change
+        since postload hooks receive managed objects.
         """
         current = ioc.ioc_tags or ""
-        if tag not in current:
-            if current:
-                ioc.ioc_tags = f"{current},{tag}"
-            else:
-                ioc.ioc_tags = tag
+        tokens = {t.strip() for t in current.split(",") if t.strip()}
+        if tag not in tokens:
+            tokens.add(tag)
+            ioc.ioc_tags = ",".join(sorted(tokens))
 
     @staticmethod
     def _remove_tag(ioc: Any, tag: str) -> None:
         """
         Remove a tag from the IOC's ``ioc_tags`` string if present.
-        Cleans up leftover commas / whitespace.
+        Uses exact token matching; preserves all other tags and their order.
         """
         current = ioc.ioc_tags or ""
-        if tag not in current:
-            return
-        parts = [t.strip() for t in current.split(",") if t.strip() != tag]
+        parts = [t.strip() for t in current.split(",") if t.strip() and t.strip() != tag]
         ioc.ioc_tags = ",".join(parts)
 
     # ── Push-hash helpers (change detection) ────────────────────

@@ -33,6 +33,14 @@ class IrisOpenCTIInterface(IrisModuleInterface):
     _pipeline_info = interface_conf.pipeline_info
     _module_configuration = interface_conf.module_configuration
 
+    # Maps (config_key, iris_hook_name, default_enabled, extra_kwargs)
+    _HOOK_SPECS: list[tuple[str, str, bool, dict[str, Any]]] = [
+        ("opencti_on_create_hook_enabled", "on_postload_ioc_create", False, {}),
+        ("opencti_on_update_hook_enabled", "on_postload_ioc_update", False, {}),
+        ("opencti_manual_hook_enabled", "on_manual_trigger_ioc", True, {"manual_hook_name": "Sync to OpenCTI"}),
+        ("opencti_on_delete_hook_enabled", "on_preload_ioc_delete", False, {}),
+    ]
+
     # ── Hook registration ───────────────────────────────────────
 
     def register_hooks(self, module_id: int) -> None:
@@ -50,39 +58,12 @@ class IrisOpenCTIInterface(IrisModuleInterface):
 
         conf = self._dict_conf
 
-        # on_postload_ioc_create
-        if conf.get("opencti_on_create_hook_enabled", True):
-            self.register_to_hook(
-                module_id,
-                iris_hook_name="on_postload_ioc_create",
-            )
-        else:
-            self.deregister_from_hook(module_id, iris_hook_name="on_postload_ioc_create")
+        for config_key, hook_name, default_enabled, extra_kwargs in self._HOOK_SPECS:
+            if conf.get(config_key, default_enabled):
+                self.register_to_hook(module_id, iris_hook_name=hook_name, **extra_kwargs)
+            else:
+                self.deregister_from_hook(module_id, iris_hook_name=hook_name)
 
-        # on_postload_ioc_update
-        if conf.get("opencti_on_update_hook_enabled", True):
-            self.register_to_hook(
-                module_id,
-                iris_hook_name="on_postload_ioc_update",
-            )
-        else:
-            self.deregister_from_hook(module_id, iris_hook_name="on_postload_ioc_update")
-
-        # on_manual_trigger_ioc
-        if conf.get("opencti_manual_hook_enabled", True):
-            self.register_to_hook(
-                module_id,
-                iris_hook_name="on_manual_trigger_ioc",
-                manual_hook_name="Sync to OpenCTI",
-            )
-        else:
-            self.deregister_from_hook(module_id, iris_hook_name="on_manual_trigger_ioc")
-
-        # on_preload_ioc_delete (fires before DB commit so enrichment data is still readable)
-        if conf.get("opencti_on_delete_hook_enabled", True):
-            self.register_to_hook(module_id, iris_hook_name="on_preload_ioc_delete")
-        else:
-            self.deregister_from_hook(module_id, iris_hook_name="on_preload_ioc_delete")
         # Deregister the old postload hook in case it was previously registered
         self.deregister_from_hook(module_id, iris_hook_name="on_postload_ioc_delete")
 
