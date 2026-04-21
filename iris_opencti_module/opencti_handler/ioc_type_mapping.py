@@ -82,6 +82,37 @@ def _parse_regkey_value(value: str) -> list[tuple[str, dict, str]]:
     return [("observable_data_raw", {"builder": lambda _v, r=raw: r}, value)]
 
 
+def _parse_filename_multi_hash(value: str) -> list[tuple[str, dict, str]]:
+    """Split ``filename|md5|sha1|sha256`` into one File observable with all hashes.
+
+    The IOC value is expected to be ``filename|md5hash|sha1hash|sha256hash``.
+    Any trailing parts that are empty or missing are silently skipped.
+    If no valid hash is found, falls back to a ``File.name`` observable.
+    """
+    parts = [p.strip() for p in value.split("|", 3)]
+    filename  = parts[0] if len(parts) > 0 else ""
+    md5_val   = parts[1] if len(parts) > 1 else ""
+    sha1_val  = parts[2] if len(parts) > 2 else ""
+    sha256_val = parts[3] if len(parts) > 3 else ""
+
+    hashes: dict[str, str] = {}
+    if md5_val:
+        hashes["MD5"] = md5_val
+    if sha1_val:
+        hashes["SHA-1"] = sha1_val
+    if sha256_val:
+        hashes["SHA-256"] = sha256_val
+
+    if not hashes:
+        return [("simple", {"key": "File.name"}, filename or value)]
+
+    obs_data: dict[str, Any] = {"type": "file"}
+    if filename:
+        obs_data["name"] = filename
+    obs_data["hashes"] = hashes
+    return [("observable_data", obs_data, value)]
+
+
 def _parse_filename_only(value: str) -> list[tuple[str, dict, str]]:
     """Extract just the filename from a ``filename|hash`` value.
 
@@ -196,6 +227,10 @@ IOC_TYPE_MAP: dict[str, dict[str, Any]] = {
     "filename|sha512": {
         "strategy": "composite",
         "parser": lambda v: _parse_filename_hash(v, "sha512"),
+    },
+    "filename|md5|sha1|sha256": {
+        "strategy": "composite",
+        "parser": _parse_filename_multi_hash,
     },
 
     # ── Email addresses ─────────────────────────────────────────

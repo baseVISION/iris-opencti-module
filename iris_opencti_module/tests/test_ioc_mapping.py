@@ -336,3 +336,75 @@ class TestUserAccountTypes:
         assert obs["type"] == "user-account"
         assert obs["account_type"] == "twitter"
         assert obs["account_login"] == "@threat_actor"
+
+
+class TestFilenameMultiHash:
+    """Tests for the filename|md5|sha1|sha256 composite IOC type."""
+
+    MD5    = "d41d8cd98f00b204e9800998ecf8427e"
+    SHA1   = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    SHA256 = "e3b0c44298fc1c149afbf4c8996fb924" + "27ae41e4483dc0d2ca59c7ef5f0c9b78"
+
+    def test_type_is_mapped(self):
+        assert resolve_ioc_type("filename|md5|sha1|sha256") is not None
+
+    def test_all_three_hashes_in_observable(self):
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        value = f"malware.exe|{self.MD5}|{self.SHA1}|{self.SHA256}"
+        result = build_observable_params(mapping, value)
+        assert len(result) == 1
+        obs = result[0]["observableData"]
+        assert obs["type"] == "file"
+        assert obs["name"] == "malware.exe"
+        assert obs["hashes"]["MD5"] == self.MD5
+        assert obs["hashes"]["SHA-1"] == self.SHA1
+        assert obs["hashes"]["SHA-256"] == self.SHA256
+
+    def test_partial_value_md5_only(self):
+        """Only md5 provided — sha1 and sha256 empty."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        value = f"evil.exe|{self.MD5}||"
+        result = build_observable_params(mapping, value)
+        obs = result[0]["observableData"]
+        assert obs["hashes"]["MD5"] == self.MD5
+        assert "SHA-1" not in obs["hashes"]
+        assert "SHA-256" not in obs["hashes"]
+
+    def test_partial_value_sha256_only(self):
+        """Only sha256 provided."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        value = f"evil.exe||{self.SHA1}|{self.SHA256}"
+        result = build_observable_params(mapping, value)
+        obs = result[0]["observableData"]
+        assert "MD5" not in obs["hashes"]
+        assert obs["hashes"]["SHA-1"] == self.SHA1
+        assert obs["hashes"]["SHA-256"] == self.SHA256
+
+    def test_no_hashes_falls_back_to_file_name(self):
+        """Value with no hash portions falls back to File.name observable."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        result = build_observable_params(mapping, "malware.exe|||")
+        assert result[0]["simple_observable_key"] == "File.name"
+        assert result[0]["simple_observable_value"] == "malware.exe"
+
+    def test_filename_without_separator_falls_back(self):
+        """Malformed value with no pipes falls back to File.name."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        result = build_observable_params(mapping, "malware.exe")
+        assert result[0]["simple_observable_key"] == "File.name"
+
+    def test_produces_single_observable(self):
+        """Must produce exactly one observable, not three separate ones."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        value = f"ransomware.exe|{self.MD5}|{self.SHA1}|{self.SHA256}"
+        result = build_observable_params(mapping, value)
+        assert len(result) == 1
+
+    def test_observable_data_key_present(self):
+        """Result must use observableData (not simple_observable_key)."""
+        mapping = resolve_ioc_type("filename|md5|sha1|sha256")
+        value = f"evil.dll|{self.MD5}|{self.SHA1}|{self.SHA256}"
+        result = build_observable_params(mapping, value)
+        assert "observableData" in result[0]
+        assert "simple_observable_key" not in result[0]
+

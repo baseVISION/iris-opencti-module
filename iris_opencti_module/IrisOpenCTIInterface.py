@@ -33,6 +33,12 @@ class IrisOpenCTIInterface(IrisModuleInterface):
     _pipeline_info = interface_conf.pipeline_info
     _module_configuration = interface_conf.module_configuration
 
+    # Custom IOC types that this module adds to IRIS on registration.
+    # These extend the standard MISP taxonomy with multi-hash file types.
+    _CUSTOM_IOC_TYPES: list[str] = [
+        "filename|md5|sha1|sha256",
+    ]
+
     # Maps (config_key, iris_hook_name, default_enabled, extra_kwargs)
     _HOOK_SPECS: list[tuple[str, str, bool, dict[str, Any]]] = [
         ("opencti_on_create_hook_enabled", "on_postload_ioc_create", False, {}),
@@ -67,8 +73,40 @@ class IrisOpenCTIInterface(IrisModuleInterface):
         # Deregister the old postload hook in case it was previously registered
         self.deregister_from_hook(module_id, iris_hook_name="on_postload_ioc_delete")
 
+        # ── Register module-specific IOC types ──────────────────
+        self._register_custom_ioc_types()
+
         # ── Validate connectivity at registration time ──────────
         self._check_opencti_connection(conf)
+
+    # ── Custom IOC type registration ──────────────────────────────
+
+    def _register_custom_ioc_types(self) -> None:
+        """
+        Insert module-specific IOC types into the IRIS ``ioc_type`` table
+        if they are not already present.  Safe to call repeatedly.
+        """
+        try:
+            from app import db
+            from sqlalchemy import text
+
+            for type_name in self._CUSTOM_IOC_TYPES:
+                db.session.execute(
+                    text(
+                        "INSERT INTO ioc_type (type_name) "
+                        "SELECT :name WHERE NOT EXISTS "
+                        "(SELECT 1 FROM ioc_type WHERE type_name = :name)"
+                    ),
+                    {"name": type_name},
+                )
+            db.session.commit()
+            self.log.info(
+                "Registered custom IOC types: %s", self._CUSTOM_IOC_TYPES
+            )
+        except Exception as exc:
+            self.log.warning(
+                "Could not register custom IOC types: %s", exc
+            )
 
     # ── Health check ──────────────────────────────────────────────
 
@@ -154,7 +192,7 @@ class IrisOpenCTIInterface(IrisModuleInterface):
         conf = self._dict_conf
 
         if hook_name == "on_postload_ioc_create":
-            if not conf.get("opencti_on_create_hook_enabled", True):
+            if not conf.get("opencti_on_create_hook_enabled", False):
                 self.log.info(
                     "on_postload_ioc_create fired but push-on-create is disabled — skipping"
                 )
@@ -164,7 +202,7 @@ class IrisOpenCTIInterface(IrisModuleInterface):
             return self._handle_iocs(data, is_manual=False)
 
         if hook_name == "on_postload_ioc_update":
-            if not conf.get("opencti_on_update_hook_enabled", True):
+            if not conf.get("opencti_on_update_hook_enabled", False):
                 self.log.info(
                     "on_postload_ioc_update fired but push-on-update is disabled — skipping"
                 )
@@ -177,7 +215,7 @@ class IrisOpenCTIInterface(IrisModuleInterface):
             return self._handle_iocs(data, is_manual=True)
 
         if hook_name == "on_preload_ioc_delete":
-            if not conf.get("opencti_on_delete_hook_enabled", True):
+            if not conf.get("opencti_on_delete_hook_enabled", False):
                 self.log.info(
                     "on_preload_ioc_delete fired but delete-on-removal is disabled — skipping"
                 )

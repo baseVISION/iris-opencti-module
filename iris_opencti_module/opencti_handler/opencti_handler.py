@@ -506,7 +506,8 @@ class OpenCTIHandler:
             )
 
     @staticmethod
-    def _render_enrichment_html(        enrichments: list[dict],
+    def _render_enrichment_html(
+        enrichments: list[dict],
         opencti_url: str,
         case_names: list[str],
         tlp_name: str,
