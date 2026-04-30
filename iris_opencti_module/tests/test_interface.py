@@ -626,7 +626,7 @@ class TestRegisterHooks:
             "opencti_ssl_verify": True,
             "opencti_http_proxy": "",
             "opencti_https_proxy": "",
-            "opencti_on_create_hook_enabled": False,    # disabled
+            "opencti_on_create_hook_enabled": False,    # disabled (push only, fields still added)
             "opencti_on_update_hook_enabled": True,
             "opencti_manual_hook_enabled": True,
             "opencti_on_delete_hook_enabled": False,     # disabled
@@ -636,9 +636,15 @@ class TestRegisterHooks:
              patch.object(iface, "deregister_from_hook") as mock_dereg:
             iface.register_hooks(module_id=7)
 
+        registered = [c.kwargs.get("iris_hook_name") or c.args[1]
+                      for c in mock_reg.call_args_list]
         deregistered = [c.kwargs.get("iris_hook_name") or c.args[1]
                         for c in mock_dereg.call_args_list]
-        assert "on_postload_ioc_create" in deregistered
+
+        # on_postload_ioc_create is always registered (for field initialisation)
+        assert "on_postload_ioc_create" in registered
+        assert "on_postload_ioc_create" not in deregistered
+        # on_preload_ioc_delete is deregistered because delete is disabled
         assert "on_preload_ioc_delete" in deregistered
         assert "on_postload_ioc_delete" in deregistered  # legacy cleanup always fires
 

@@ -64,7 +64,7 @@ def _make_config(**overrides) -> dict:
         "opencti_case_naming_mode": "case_name",
         "opencti_case_name_prefix": "IRIS-Case",
         "opencti_case_custom_attribute": "",
-        "opencti_case_description_enabled": True,
+
     }
     defaults.update(overrides)
     return defaults
@@ -77,6 +77,7 @@ def _make_ioc(
     description="",
     tlp=None,
     enrichment=None,
+    custom_attributes=None,
 ):
     """Return a mock IRIS IOC object."""
     ioc = SimpleNamespace()
@@ -87,6 +88,7 @@ def _make_ioc(
     ioc.ioc_description = description
     ioc.tlp = tlp
     ioc.ioc_enrichment = enrichment
+    ioc.custom_attributes = custom_attributes
     return ioc
 
 

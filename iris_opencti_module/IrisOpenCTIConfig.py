@@ -8,7 +8,7 @@ IRIS UI under Manage → Modules → IrisOpenCTI.
 module_name = "IrisOpenCTI"
 module_description = "Pushes IRIS IOCs to OpenCTI as observables and indicators, linked to Case Incidents"
 interface_version = "1.2.0"
-module_version = "1.0.5"
+module_version = "1.1.0"
 
 pipeline_support = False
 pipeline_info = {}
@@ -190,14 +190,5 @@ module_configuration = [
         "type": "string",
         "section": "Case Naming",
     },
-    {
-        "param_name": "opencti_case_description_enabled",
-        "param_human_name": "Include case description",
-        "param_description": "Copy the IRIS case description to the OpenCTI Case Incident. "
-                             "Disable to prevent leaking sensitive details.",
-        "default": True,
-        "mandatory": False,
-        "type": "bool",
-        "section": "Case Naming",
-    },
 ]
+

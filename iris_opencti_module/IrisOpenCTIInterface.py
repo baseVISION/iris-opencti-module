@@ -16,6 +16,7 @@ from iris_interface import IrisInterfaceStatus
 import iris_opencti_module.IrisOpenCTIConfig as interface_conf
 from iris_opencti_module.opencti_handler.opencti_handler import OpenCTIHandler
 from iris_opencti_module.opencti_handler.opencti_client import OpenCTIClient, OpenCTIClientError
+from iris_opencti_module.opencti_handler.attribute_setup import ensure_ioc_attribute_exists
 
 
 class IrisOpenCTIInterface(IrisModuleInterface):
@@ -40,8 +41,10 @@ class IrisOpenCTIInterface(IrisModuleInterface):
     ]
 
     # Maps (config_key, iris_hook_name, default_enabled, extra_kwargs)
+    # Note: on_postload_ioc_create is handled separately — it is always
+    # registered so that IOC custom fields are added at creation time
+    # regardless of whether push-on-create is enabled.
     _HOOK_SPECS: list[tuple[str, str, bool, dict[str, Any]]] = [
-        ("opencti_on_create_hook_enabled", "on_postload_ioc_create", False, {}),
         ("opencti_on_update_hook_enabled", "on_postload_ioc_update", False, {}),
         ("opencti_manual_hook_enabled", "on_manual_trigger_ioc", True, {"manual_hook_name": "Sync to OpenCTI"}),
         ("opencti_on_delete_hook_enabled", "on_preload_ioc_delete", False, {}),
@@ -69,6 +72,15 @@ class IrisOpenCTIInterface(IrisModuleInterface):
                 self.register_to_hook(module_id, iris_hook_name=hook_name, **extra_kwargs)
             else:
                 self.deregister_from_hook(module_id, iris_hook_name=hook_name)
+
+        # Ensure our tab exists in the global IOC attribute template so it
+        # appears in the "Add IOC" modal before the IOC is even saved.
+        confidence_default = int(conf.get("opencti_confidence", 50))
+        ensure_ioc_attribute_exists(self.log, confidence_default=confidence_default)
+
+        # Always register the create hook so IOC custom fields are added/updated
+        # on the IOC record immediately after creation.
+        self.register_to_hook(module_id, iris_hook_name="on_postload_ioc_create")
 
         # Deregister the old postload hook in case it was previously registered
         self.deregister_from_hook(module_id, iris_hook_name="on_postload_ioc_delete")
@@ -192,9 +204,13 @@ class IrisOpenCTIInterface(IrisModuleInterface):
         conf = self._dict_conf
 
         if hook_name == "on_postload_ioc_create":
+            # Always initialise IOC custom fields so the OpenCTI tab is
+            # visible to analysts immediately after creating an IOC.
+            self._ensure_fields_on_iocs(data, conf)
+            # Only push to OpenCTI when push-on-create is explicitly enabled.
             if not conf.get("opencti_on_create_hook_enabled", False):
                 self.log.info(
-                    "on_postload_ioc_create fired but push-on-create is disabled — skipping"
+                    "on_postload_ioc_create: fields added; push-on-create is disabled — skipping push"
                 )
                 return IrisInterfaceStatus.I2Success(
                     data=data, logs=list(self.message_queue)
@@ -245,6 +261,29 @@ class IrisOpenCTIInterface(IrisModuleInterface):
             return handler  # creation failed — error status
         handler._is_manual = is_manual
         return self._iterate_iocs(data, handler, _process, "push")
+
+    # ── Field initialisation (no OpenCTI connection required) ───
+
+    def _ensure_fields_on_iocs(self, data: Any, conf: dict) -> None:
+        """
+        Add OpenCTI custom fields to each IOC in *data* without
+        connecting to OpenCTI.  Called on every IOC create so
+        analysts see the tab immediately.
+        """
+        try:
+            confidence = max(0, min(100, int(conf.get("opencti_confidence", 50))))
+        except (ValueError, TypeError):
+            confidence = 50
+
+        iocs = data if isinstance(data, list) else [data]
+        for ioc in iocs:
+            try:
+                OpenCTIHandler.ensure_ioc_custom_fields(ioc, confidence)
+            except Exception as exc:
+                self.log.warning(
+                    "Failed to initialise custom fields for IOC '%s': %s",
+                    getattr(ioc, "ioc_value", "?"), exc,
+                )
 
     # ── IOC deletion ────────────────────────────────────────────
 

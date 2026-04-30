@@ -5,9 +5,10 @@ An [IRIS](https://github.com/dfir-iris/iris-web) processor module that pushes IO
 ## Features
 
 - Syncs IRIS IOCs to OpenCTI as STIX Cyber Observables + Indicators, grouped under a Case Incident — on create, update, delete, or manual trigger
-- Skips re-push when nothing changed (hashes value, type, description, and TLP)
+- Skips re-push when nothing changed (hashes value, type, OpenCTI description, confidence override, and TLP)
 - Writes an enrichment tab to each IOC with score, labels, indicators, ATT&CK context, sightings, and containers fetched from OpenCTI
 - Maps 30+ IRIS IOC types to STIX observables; unsupported types are skipped and tagged `opencti:failed`
+- Adds per-IOC custom fields (**OpenCTI Description**, **OpenCTI Confidence Score**) so analysts control exactly what is shared with OpenCTI
 
 ## Requirements
 
@@ -129,8 +130,19 @@ All settings are in the IRIS UI under **Manage → Modules → IrisOpenCTI**.
 | Create Case Incident | `true` | Create/link an OpenCTI Case Incident per IRIS case |
 | Default TLP | `amber` | Fallback TLP: `clear`, `green`, `amber`, `amber+strict`, `red` |
 | Author organization | *(empty)* | "Created by" identity in OpenCTI |
-| Default confidence | `50` | Confidence level 0–100 |
+| Default confidence | `50` | Confidence level 0–100 (can be overridden per-IOC via the **OpenCTI Confidence Score** custom field) |
 | IRIS base URL | *(empty)* | Link back to IRIS IOC page on OpenCTI Case Incidents |
+
+### IOC-level custom fields
+
+On the first sync the module creates three editable custom fields directly on each IOC in the IRIS UI.
+
+| Tab | Field | Purpose |
+|---|---|---|
+| **OpenCTI** | **OpenCTI Description** | Description pushed to OpenCTI as the observable description. Leave empty to create the observable without a description. |
+| **OpenCTI** | **OpenCTI Confidence Score** | Integer 0–100. Overrides the module-level *Default confidence* for this individual IOC. Leave empty to use the module default. |
+
+> **Why a separate description field?**  The IRIS `ioc_description` field often contains internal investigation notes that should not leave the platform.  The **OpenCTI Description** field lets analysts explicitly write a public-facing description when they want context to appear in OpenCTI.
 
 ### Case Naming
 

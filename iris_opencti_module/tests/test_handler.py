@@ -57,7 +57,7 @@ def _make_config(**overrides):
         "opencti_case_naming_mode": "case_name",
         "opencti_case_name_prefix": "IRIS-Case",
         "opencti_case_custom_attribute": "",
-        "opencti_case_description_enabled": True,
+
     }
     defaults.update(overrides)
     return defaults
@@ -70,6 +70,7 @@ def _make_ioc(
     description="",
     tlp=None,
     enrichment=None,
+    custom_attributes=None,
 ):
     """Return a mock IRIS IOC object."""
     ioc = SimpleNamespace()
@@ -79,6 +80,7 @@ def _make_ioc(
     ioc.ioc_description = description
     ioc.tlp = tlp
     ioc.ioc_enrichment = enrichment
+    ioc.custom_attributes = custom_attributes
     return ioc
 
 
@@ -268,25 +270,6 @@ class TestOpenCTIHandler:
         args, kwargs = client.find_or_create_case_incident.call_args
         name = kwargs.get("name") or args[0]
         assert name == "IR-2026-7"
-
-    def test_case_description_suppressed(self, MockClient):
-        """When description is disabled, empty string should be passed."""
-        client = MockClient.return_value
-        client.resolve_or_create_author.return_value = None
-        client.resolve_tlp.return_value = None
-        client.create_observable.return_value = {"id": "obs-5"}
-        client.find_or_create_case_incident.return_value = {"id": "case-5"}
-        client.link_to_case.return_value = True
-
-        config = _make_config(opencti_case_description_enabled=False)
-        handler = OpenCTIHandler(mod_config=config, logger=MagicMock())
-        ioc = _make_ioc()
-        case = _make_case(description="Super secret customer info")
-
-        handler.handle_ioc(ioc, cases_info=[case])
-
-        _, kwargs = client.find_or_create_case_incident.call_args
-        assert kwargs.get("description") == "" or "description" not in kwargs
 
     def test_tag_not_duplicated(self, MockClient):
         """If opencti:pushed tag already exists, don't add it again."""
@@ -779,33 +762,22 @@ class TestMultiCaseIOC:
 
         handler.handle_ioc(ioc, cases_info=cases)
 
-        # Two calls: OpenCTI enrichment tab + Internal Description field
-        assert mock_add_tab.call_count == 2
-        opencti_call = mock_add_tab.call_args_list[0]
-        html = opencti_call[1]["field_value"]
+        # Three calls: Sync Report HTML + OpenCTI Description + OpenCTI Confidence Score
+        assert mock_add_tab.call_count == 3
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Alpha Case" in html
         assert "Beta Case" in html
         assert "Case Incidents (2)" in html
 
 
-# ── Internal Description field ─────────────────────────────────
-
-
-@patch("iris_opencti_module.opencti_handler.opencti_handler.OpenCTIClient")
-class TestInternalDescriptionField:
-    """
-    Verify that _ensure_internal_description_field adds the editable
-    'Internal Description' input_textfield to new IOCs but never
-    overwrites analyst-entered content on subsequent syncs.
-    """
-
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
-    def test_internal_field_added_on_first_push(self, mock_add_tab, MockClient):
-        """On first push, Internal Description field should be created."""
+    def test_opencti_description_field_added_on_first_push(self, mock_add_tab, MockClient):
+        """On first push, OpenCTI Description field should be created."""
         client = MockClient.return_value
         client.resolve_or_create_author.return_value = None
         client.resolve_tlp.return_value = None
-        client.create_observable.return_value = {"id": "obs-int-1"}
+        client.create_observable.return_value = {"id": "obs-od-1"}
         client.get_observable_enrichment.return_value = None
 
         handler = OpenCTIHandler(
@@ -813,59 +785,50 @@ class TestInternalDescriptionField:
             logger=MagicMock(),
         )
         ioc = _make_ioc(value="evil.com", type_name="domain")
-        # No custom_attributes on fresh IOC
 
         handler.handle_ioc(ioc)
 
-        internal_calls = [
+        desc_calls = [
             c for c in mock_add_tab.call_args_list
-            if c[1].get("tab_name") == "Internal"
+            if c[1].get("tab_name") == "OpenCTI"
+            and c[1].get("field_name") == "OpenCTI Description"
         ]
-        assert len(internal_calls) == 1
-        assert internal_calls[0][1]["field_name"] == "Internal Description"
-        assert internal_calls[0][1]["field_type"] == "input_textfield"
+        assert len(desc_calls) == 1
+        assert desc_calls[0][1]["field_type"] == "input_textfield"
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
-    def test_internal_field_not_overwritten_if_exists(self, mock_add_tab, MockClient):
-        """If the Internal Description field already exists, it must not be overwritten."""
+    def test_opencti_confidence_field_added_on_first_push(self, mock_add_tab, MockClient):
+        """On first push, OpenCTI Confidence Score is created pre-filled with the module default."""
         client = MockClient.return_value
         client.resolve_or_create_author.return_value = None
         client.resolve_tlp.return_value = None
-        client.create_observable.return_value = {"id": "obs-int-2"}
+        client.create_observable.return_value = {"id": "obs-oc-1"}
         client.get_observable_enrichment.return_value = None
 
         handler = OpenCTIHandler(
-            mod_config=_make_config(opencti_create_case_incident=False),
+            mod_config=_make_config(opencti_confidence=75, opencti_create_case_incident=False),
             logger=MagicMock(),
         )
         ioc = _make_ioc(value="evil.com", type_name="domain")
-        # Simulate analyst has already written content in the field
-        ioc.custom_attributes = {
-            "Internal": {
-                "Internal Description": {
-                    "type": "input_textfield",
-                    "mandatory": False,
-                    "value": "Analyst notes go here",
-                }
-            }
-        }
 
         handler.handle_ioc(ioc)
 
-        internal_calls = [
+        conf_calls = [
             c for c in mock_add_tab.call_args_list
-            if c[1].get("tab_name") == "Internal"
+            if c[1].get("tab_name") == "OpenCTI"
+            and c[1].get("field_name") == "OpenCTI Confidence Score"
         ]
-        # Must not have been called — existing content preserved
-        assert len(internal_calls) == 0
+        assert len(conf_calls) == 1
+        assert conf_calls[0][1]["field_type"] == "input_string"
+        assert conf_calls[0][1]["field_value"] == "75"
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
-    def test_internal_field_not_pushed_to_opencti(self, mock_add_tab, MockClient):
-        """Internal Description value must never be sent as observable description."""
+    def test_opencti_description_not_overwritten_if_exists(self, mock_add_tab, MockClient):
+        """If OpenCTI Description already exists, it must not be overwritten."""
         client = MockClient.return_value
         client.resolve_or_create_author.return_value = None
         client.resolve_tlp.return_value = None
-        client.create_observable.return_value = {"id": "obs-int-3"}
+        client.create_observable.return_value = {"id": "obs-od-2"}
         client.get_observable_enrichment.return_value = None
 
         handler = OpenCTIHandler(
@@ -874,39 +837,209 @@ class TestInternalDescriptionField:
         )
         ioc = _make_ioc(value="evil.com", type_name="domain")
         ioc.custom_attributes = {
-            "Internal": {
-                "Internal Description": {
+            "OpenCTI": {
+                "OpenCTI Description": {
                     "type": "input_textfield",
                     "mandatory": False,
-                    "value": "TOP SECRET INTERNAL NOTE",
-                }
+                    "value": "Analyst-written public description",
+                },
+                "OpenCTI Confidence Score": {
+                    "type": "input_textfield",
+                    "mandatory": False,
+                    "value": "80",
+                },
             }
         }
 
         handler.handle_ioc(ioc)
 
-        # create_observable must not have received the internal description
+        desc_calls = [
+            c for c in mock_add_tab.call_args_list
+            if c[1].get("tab_name") == "OpenCTI"
+            and c[1].get("field_name") == "OpenCTI Description"
+        ]
+        assert len(desc_calls) == 0  # must not overwrite existing content
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_opencti_description_pushed_to_opencti(self, mock_add_tab, MockClient):
+        """Value in OpenCTI Description custom field is passed to create_observable."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-od-3"}
+        client.get_observable_enrichment.return_value = None
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_create_case_incident=False),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="evil.com", type_name="domain")
+        ioc.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Description": {
+                    "type": "input_textfield",
+                    "value": "Public threat description",
+                },
+            }
+        }
+
+        handler.handle_ioc(ioc)
+
         call_kwargs = client.create_observable.call_args[1]
         description = call_kwargs.get("simple_observable_description", "") or ""
-        assert "TOP SECRET INTERNAL NOTE" not in description
+        assert "Public threat description" in description
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
-    def test_internal_field_not_added_on_failed_push(self, mock_add_tab, MockClient):
-        """Internal Description field must NOT be added when the push fails."""
+    def test_ioc_description_not_pushed_to_opencti(self, mock_add_tab, MockClient):
+        """Internal ioc_description must never be pushed to OpenCTI."""
         client = MockClient.return_value
         client.resolve_or_create_author.return_value = None
         client.resolve_tlp.return_value = None
-        client.create_observable.return_value = None  # push fails
+        client.create_observable.return_value = {"id": "obs-od-4"}
+        client.get_observable_enrichment.return_value = None
 
         handler = OpenCTIHandler(
             mod_config=_make_config(opencti_create_case_incident=False),
             logger=MagicMock(),
         )
-        ioc = _make_ioc(value="evil.com", type_name="domain")
+        ioc = _make_ioc(
+            value="evil.com",
+            type_name="domain",
+            description="INTERNAL ONLY: do not share",
+        )
 
         handler.handle_ioc(ioc)
 
-        mock_add_tab.assert_not_called()
+        call_kwargs = client.create_observable.call_args[1]
+        description = call_kwargs.get("simple_observable_description", "") or ""
+        assert "INTERNAL ONLY" not in description
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_confidence_score_override_used(self, mock_add_tab, MockClient):
+        """OpenCTI Confidence Score custom field overrides the module default."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-cs-1"}
+        client.get_observable_enrichment.return_value = None
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_confidence=50, opencti_create_case_incident=False),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="evil.com", type_name="domain")
+        ioc.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Confidence Score": {
+                    "type": "input_textfield",
+                    "value": "90",
+                },
+            }
+        }
+
+        handler.handle_ioc(ioc)
+
+        call_kwargs = client.create_observable.call_args[1]
+        assert call_kwargs.get("x_opencti_score") == 90
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_confidence_score_empty_uses_default(self, mock_add_tab, MockClient):
+        """Empty OpenCTI Confidence Score falls back to the module default."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-cs-2"}
+        client.get_observable_enrichment.return_value = None
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_confidence=75, opencti_create_case_incident=False),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="evil.com", type_name="domain")
+        # No custom_attributes — no override
+
+        handler.handle_ioc(ioc)
+
+        call_kwargs = client.create_observable.call_args[1]
+        assert call_kwargs.get("x_opencti_score") == 75
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_confidence_score_invalid_uses_default(self, mock_add_tab, MockClient):
+        """Non-numeric OpenCTI Confidence Score falls back to module default."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-cs-3"}
+        client.get_observable_enrichment.return_value = None
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_confidence=60, opencti_create_case_incident=False),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="evil.com", type_name="domain")
+        ioc.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Confidence Score": {
+                    "type": "input_textfield",
+                    "value": "not-a-number",
+                },
+            }
+        }
+
+        handler.handle_ioc(ioc)
+
+        call_kwargs = client.create_observable.call_args[1]
+        assert call_kwargs.get("x_opencti_score") == 60
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_confidence_score_clamped_to_range(self, mock_add_tab, MockClient):
+        """OpenCTI Confidence Score > 100 is clamped to 100."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        client.resolve_tlp.return_value = None
+        client.create_observable.return_value = {"id": "obs-cs-4"}
+        client.get_observable_enrichment.return_value = None
+
+        handler = OpenCTIHandler(
+            mod_config=_make_config(opencti_confidence=50, opencti_create_case_incident=False),
+            logger=MagicMock(),
+        )
+        ioc = _make_ioc(value="evil.com", type_name="domain")
+        ioc.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Confidence Score": {
+                    "type": "input_textfield",
+                    "value": "999",
+                },
+            }
+        }
+
+        handler.handle_ioc(ioc)
+
+        call_kwargs = client.create_observable.call_args[1]
+        assert call_kwargs.get("x_opencti_score") == 100
+
+    @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
+    def test_confidence_score_triggers_rehash_on_change(self, mock_add_tab, MockClient):
+        """Changing OpenCTI Confidence Score should produce a different hash."""
+        client = MockClient.return_value
+        client.resolve_or_create_author.return_value = None
+        handler = OpenCTIHandler(mod_config=_make_config(), logger=MagicMock())
+
+        ioc1 = _make_ioc(value="evil.com", type_name="domain")
+        ioc1.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Confidence Score": {"type": "input_textfield", "value": "70"}
+            }
+        }
+        ioc2 = _make_ioc(value="evil.com", type_name="domain")
+        ioc2.custom_attributes = {
+            "OpenCTI": {
+                "OpenCTI Confidence Score": {"type": "input_textfield", "value": "90"}
+            }
+        }
+
+        assert handler._compute_ioc_hash(ioc1) != handler._compute_ioc_hash(ioc2)
 
 
 # ── OpenCTI ID storage ─────────────────────────────────────────
@@ -1213,8 +1346,15 @@ class TestHashComputation:
         MockClient.return_value.resolve_or_create_author.return_value = None
         handler = OpenCTIHandler(mod_config=_make_config(), logger=MagicMock())
 
-        ioc1 = _make_ioc(value="evil.com", type_name="domain", description="v1")
-        ioc2 = _make_ioc(value="evil.com", type_name="domain", description="v2")
+        # Hash uses OpenCTI Description custom field, not ioc_description
+        ioc1 = _make_ioc(value="evil.com", type_name="domain")
+        ioc1.custom_attributes = {
+            "OpenCTI": {"OpenCTI Description": {"type": "input_textfield", "value": "v1"}}
+        }
+        ioc2 = _make_ioc(value="evil.com", type_name="domain")
+        ioc2.custom_attributes = {
+            "OpenCTI": {"OpenCTI Description": {"type": "input_textfield", "value": "v2"}}
+        }
 
         assert handler._compute_ioc_hash(ioc1) != handler._compute_ioc_hash(ioc2)
 
@@ -1252,12 +1392,12 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        # Two calls: OpenCTI enrichment tab + Internal Description field
-        assert mock_add_tab.call_count == 2
-        opencti_call = mock_add_tab.call_args_list[0]
-        assert opencti_call[1]["tab_name"] == "OpenCTI"
-        assert opencti_call[1]["field_type"] == "html"
-        assert "obs-enrich-1" in opencti_call[1]["field_value"]
+        # Three calls: Sync Report HTML + OpenCTI Description + OpenCTI Confidence Score
+        assert mock_add_tab.call_count == 3
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        assert html_call[1]["tab_name"] == "OpenCTI"
+        assert html_call[1]["field_type"] == "html"
+        assert "obs-enrich-1" in html_call[1]["field_value"]
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
     def test_enrichment_tab_includes_case_name(self, mock_add_tab, MockClient):
@@ -1279,14 +1419,15 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc, cases_info=[case])
 
-        # Two calls: OpenCTI enrichment tab + Internal Description field
-        assert mock_add_tab.call_count == 2
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        # Three calls: Sync Report HTML + OpenCTI Description + OpenCTI Confidence Score
+        assert mock_add_tab.call_count == 3
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Phishing at ACME" in html
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
     def test_enrichment_tab_not_written_on_failure(self, mock_add_tab, MockClient):
-        """Failed push should NOT write an enrichment tab."""
+        """Failed push should NOT write an HTML enrichment tab (custom fields still created)."""
         client = MockClient.return_value
         client.resolve_or_create_author.return_value = None
         client.resolve_tlp.return_value = None
@@ -1301,7 +1442,13 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        mock_add_tab.assert_not_called()
+        # Custom fields (OpenCTI Description + OpenCTI Confidence Score) are
+        # created even on failure so analysts can fill them in before retrying.
+        html_calls = [
+            c for c in mock_add_tab.call_args_list
+            if c[1].get("field_type") == "html"
+        ]
+        assert len(html_calls) == 0
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
     def test_enrichment_tab_contains_clickable_link(self, mock_add_tab, MockClient):
@@ -1323,7 +1470,8 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "https://opencti.example.com/dashboard/observations/observables/obs-link-test" in html
         assert 'target="_blank"' in html
 
@@ -1358,7 +1506,8 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Containers (2)" in html
         assert "Weekly Threat Intel" in html
         assert "#42 - Phishing" in html
@@ -1399,7 +1548,8 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         # Score
         assert "90" in html
         # Labels
@@ -1440,7 +1590,8 @@ class TestEnrichmentTab:
 
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Containers" not in html
 
 
@@ -1489,7 +1640,8 @@ class TestThreatContextEnrichment:
         ioc = _make_ioc(value="evil.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Threat Actors (2)" in html
         assert "APT28" in html
         assert "Lazarus Group" in html
@@ -1534,7 +1686,8 @@ class TestThreatContextEnrichment:
         ioc = _make_ioc(value="1.2.3.4", type_name="ip-src")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Malware (1)" in html
         assert "Emotet" in html
         assert "arsenal/malware/mal-001" in html
@@ -1580,7 +1733,8 @@ class TestThreatContextEnrichment:
         ioc = _make_ioc(value="evil.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "ATT&amp;CK Techniques (2)" in html or "ATT&CK Techniques (2)" in html
         assert "T1566.001" in html
         assert "T1059" in html
@@ -1619,7 +1773,8 @@ class TestThreatContextEnrichment:
         ioc = _make_ioc(value="clean.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Threat Actors" not in html
         assert "Malware" not in html
         assert "Campaigns" not in html
@@ -1692,7 +1847,8 @@ class TestThreatContextEnrichment:
         ioc = _make_ioc(value="evil.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Intrusion Sets (1)" in html
         assert "Cozy Bear" in html
         assert "threats/intrusion_sets/is-001" in html
@@ -1752,7 +1908,8 @@ class TestSightingsEnrichment:
         ioc = _make_ioc(value="evil.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Sightings (2)" in html
         assert "CERT-EU" in html
         assert "Internal SOC" in html
@@ -1800,7 +1957,8 @@ class TestSightingsEnrichment:
         ioc = _make_ioc(value="clean.org", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Sightings (1)" in html
         assert "Partner Feed" in html
         assert "1x" not in html  # no badge for count=1
@@ -1838,7 +1996,8 @@ class TestSightingsEnrichment:
         ioc = _make_ioc(value="clean.com", type_name="domain")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
         assert "Sightings" not in html
 
     @patch("iris_opencti_module.opencti_handler.opencti_handler.add_tab_attribute_field")
@@ -1904,7 +2063,8 @@ class TestSightingsEnrichment:
         ioc = _make_ioc(value="10.0.0.1", type_name="ip-src")
         handler.handle_ioc(ioc)
 
-        html = mock_add_tab.call_args_list[0][1]["field_value"]
+        html_call = next(c for c in mock_add_tab.call_args_list if c[1].get("field_type") == "html")
+        html = html_call[1]["field_value"]
 
         # All sections present
         assert "95" in html  # score

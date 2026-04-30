@@ -94,7 +94,6 @@ class OpenCTIHandler:
         self._case_naming_mode = config.get("opencti_case_naming_mode", "case_name")
         self._case_name_prefix = config.get("opencti_case_name_prefix", "IRIS-Case")
         self._case_custom_attr = config.get("opencti_case_custom_attribute", "").strip().strip("'\"")
-        self._case_desc_enabled = bool(config.get("opencti_case_description_enabled", True))
         self._iris_url = (config.get("opencti_iris_url", "") or "").strip().rstrip("/")
 
     # ── Public entry point ──────────────────────────────────────
@@ -126,6 +125,11 @@ class OpenCTIHandler:
         type_name = ioc.ioc_type.type_name if ioc.ioc_type else "unknown"
 
         self.log.info("Processing IOC '%s' (type=%s)", ioc_value, type_name)
+
+        # ── Ensure editable custom fields exist on the IOC ──────
+        # Done unconditionally so the OpenCTI tab is visible to analysts
+        # even before the first successful push.
+        OpenCTIHandler.ensure_ioc_custom_fields(ioc, self._confidence)
 
         # ── Check for new case associations ─────────────────────
         current_case_ids = set()
@@ -177,15 +181,35 @@ class OpenCTIHandler:
             marking_ids.append(tlp_id)
 
         # ── Step 3: build observable parameters ─────────────────
-        ioc_description = getattr(ioc, "ioc_description", None) or ""
+        # Use the analyst-provided OpenCTI Description custom field rather than
+        # the internal ioc_description, which may contain sensitive details.
+        opencti_description = self._extract_ioc_custom_attribute(
+            ioc, "OpenCTI", "OpenCTI Description"
+        ) or None
+
+        # Allow per-IOC confidence override via custom field.
+        confidence = self._confidence
+        confidence_override_str = self._extract_ioc_custom_attribute(
+            ioc, "OpenCTI", "OpenCTI Confidence Score"
+        )
+        if confidence_override_str is not None:
+            try:
+                confidence = max(0, min(100, int(confidence_override_str)))
+            except (ValueError, TypeError):
+                self.log.warning(
+                    "Invalid OpenCTI Confidence Score '%s' for IOC '%s' "
+                    "— using module default %d",
+                    confidence_override_str, ioc_value, self._confidence,
+                )
+
         obs_param_list = build_observable_params(
             mapping=mapping,
             ioc_value=ioc_value,
             create_indicator=self._create_indicator,
             marking_ids=marking_ids,
             author_id=self._author_id,
-            confidence=self._confidence,
-            description=ioc_description if ioc_description else None,
+            confidence=confidence,
+            description=opencti_description,
         )
 
         # ── Step 4: create observables in OpenCTI ───────────────
@@ -266,7 +290,7 @@ class OpenCTIHandler:
 
         for case_obj in cases_info:
             case_name = self._resolve_case_name(case_obj)
-            case_desc = self._resolve_case_description(case_obj)
+            case_desc = getattr(case_obj, "description", "") or ""
 
             case = self.client.find_or_create_case_incident(
                 name=case_name,
@@ -391,14 +415,6 @@ class OpenCTIHandler:
 
         return None
 
-    def _resolve_case_description(self, case_info: Any) -> str:
-        """
-        Return the case description if enabled, empty string otherwise.
-        """
-        if not self._case_desc_enabled:
-            return ""
-        return getattr(case_info, "description", "") or ""
-
     # ── Enrichment tab (IRIS UI) ────────────────────────────────
 
     def _update_enrichment_tab(
@@ -467,43 +483,62 @@ class OpenCTIHandler:
                 exc,
             )
 
-        self._ensure_internal_description_field(ioc)
-
-    def _ensure_internal_description_field(self, ioc: Any) -> None:
+    @staticmethod
+    def ensure_ioc_custom_fields(ioc: Any, confidence: int = 50) -> None:
         """
-        Add an editable "Internal Description" text field to the IOC's
-        custom attributes the first time this IOC is processed.
+        Add editable custom fields to the IOC if they are not already present.
 
-        The field lives under the "Internal" tab in the IRIS IOC edit
-        dialog and is **never** read or pushed to OpenCTI — it is purely
-        for analyst-entered notes that must remain within IRIS.
+        This is a ``@staticmethod`` so it can be called from the IRIS interface
+        layer (e.g. on IOC create) without needing a full handler instance or
+        an active OpenCTI connection.
 
-        ``add_tab_attribute_field`` always overwrites, so we check for
-        the field's existence first and skip the call if it is already
-        present (i.e. the analyst may have written content there).
+        Fields added:
+
+        **OpenCTI tab**
+        - ``OpenCTI Description`` — public-facing description pushed to
+          OpenCTI instead of the internal ``ioc_description``.
+        - ``OpenCTI Confidence Score`` — pre-filled with the module default;
+          analyst can override per-IOC.
+
+        ``add_tab_attribute_field`` always overwrites, so existence is
+        checked first to preserve any analyst-entered content.
         """
         if add_tab_attribute_field is None:
             return
 
         custom_attrs = getattr(ioc, "custom_attributes", None) or {}
-        if "Internal Description" in custom_attrs.get("Internal", {}):
-            return  # field already exists — preserve analyst content
-
+        opencti_section = custom_attrs.get("OpenCTI", {})
         ioc_val_str = getattr(ioc, "ioc_value", "?") or "?"
-        try:
-            add_tab_attribute_field(
-                ioc,
-                tab_name="Internal",
-                field_name="Internal Description",
-                field_type="input_textfield",
-                field_value="",
-            )
-        except Exception as exc:
-            self.log.warning(
-                "Failed to add Internal Description field for IOC '%s': %s",
-                ioc_val_str,
-                exc,
-            )
+
+        if "OpenCTI Description" not in opencti_section:
+            try:
+                add_tab_attribute_field(
+                    ioc,
+                    tab_name="OpenCTI",
+                    field_name="OpenCTI Description",
+                    field_type="input_textfield",
+                    field_value="",
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Failed to add OpenCTI Description field for IOC '%s': %s",
+                    ioc_val_str, exc,
+                )
+
+        if "OpenCTI Confidence Score" not in opencti_section:
+            try:
+                add_tab_attribute_field(
+                    ioc,
+                    tab_name="OpenCTI",
+                    field_name="OpenCTI Confidence Score",
+                    field_type="input_string",
+                    field_value=str(confidence),
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Failed to add OpenCTI Confidence Score field for IOC '%s': %s",
+                    ioc_val_str, exc,
+                )
 
     @staticmethod
     def _render_enrichment_html(
@@ -525,6 +560,30 @@ class OpenCTIHandler:
             tlp_name=tlp_name,
             synced_at=synced_at,
         )
+
+    @staticmethod
+    def _extract_ioc_custom_attribute(ioc: Any, tab_name: str, field_name: str) -> str | None:
+        """
+        Read a custom attribute value from ``ioc.custom_attributes``.
+
+        IRIS stores custom attributes as::
+
+            {"Tab Name": {"Field Name": {"type": ..., "value": ...}, ...}}
+
+        Returns the stripped string value if found and non-empty, else ``None``.
+        """
+        custom_attrs = getattr(ioc, "custom_attributes", None)
+        if not custom_attrs or not isinstance(custom_attrs, dict):
+            return None
+        section = custom_attrs.get(tab_name, {})
+        if not isinstance(section, dict):
+            return None
+        attr = section.get(field_name)
+        if isinstance(attr, dict):
+            val = attr.get("value", "")
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
 
     @staticmethod
     def _add_tag(ioc: Any, tag: str) -> None:
@@ -576,22 +635,30 @@ class OpenCTIHandler:
         Compute a SHA-256 digest of the IOC's key fields.
 
         Only fields that should trigger a re-push are included:
-        value, type, description, and TLP.  The ``ioc_tags`` field
-        is excluded to avoid infinite loops (since we write tags on
-        push).
+        value, type, OpenCTI description, confidence override, and TLP.
+        The internal ``ioc_description`` and ``ioc_tags`` fields are
+        excluded — the former to prevent internal notes from leaking
+        changes, the latter to avoid infinite loops (since we write
+        tags on push).
         """
         value = getattr(ioc, "ioc_value", "") or ""
         type_name = ""
         ioc_type = getattr(ioc, "ioc_type", None)
         if ioc_type:
             type_name = getattr(ioc_type, "type_name", "") or ""
-        description = getattr(ioc, "ioc_description", "") or ""
+        # Read description and confidence from OpenCTI-specific custom fields.
+        description = (
+            OpenCTIHandler._extract_ioc_custom_attribute(ioc, "OpenCTI", "OpenCTI Description") or ""
+        )
+        confidence_override = (
+            OpenCTIHandler._extract_ioc_custom_attribute(ioc, "OpenCTI", "OpenCTI Confidence Score") or ""
+        )
         tlp_name = ""
         tlp_obj = getattr(ioc, "tlp", None)
         if tlp_obj:
             tlp_name = getattr(tlp_obj, "tlp_name", "") or ""
 
-        payload = f"{value}|{type_name}|{description}|{tlp_name}"
+        payload = f"{value}|{type_name}|{description}|{confidence_override}|{tlp_name}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
