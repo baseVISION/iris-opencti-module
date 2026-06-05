@@ -5,10 +5,12 @@ Defines module metadata and the configuration schema exposed in the
 IRIS UI under Manage → Modules → IrisOpenCTI.
 """
 
+from importlib.metadata import version as _pkg_version
+
 module_name = "IrisOpenCTI"
 module_description = "Pushes IRIS IOCs to OpenCTI as observables and indicators, linked to Case Incidents"
 interface_version = "1.2.0"
-module_version = "1.2.0"
+module_version = _pkg_version("iris_opencti_module")
 
 pipeline_support = False
 pipeline_info = {}

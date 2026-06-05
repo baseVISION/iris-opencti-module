@@ -198,7 +198,7 @@ pip install pytest
 pytest iris_opencti_module/tests/ -v
 ```
 
-Integration tests run automatically when pycti is installed and OpenCTI is reachable at `http://localhost:8080`. Override with env vars:
+When preparing a new release, update the version in `pyproject.toml` — `module_version` in `IrisOpenCTIConfig.py` is derived automatically from the installed package. Integration tests run automatically when pycti is installed and OpenCTI is reachable at `http://localhost:8080`. Override with env vars:
 
 ```bash
 export OPENCTI_URL=http://localhost:8080
