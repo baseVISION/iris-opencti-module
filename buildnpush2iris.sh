@@ -15,11 +15,12 @@ Help()
 {
    echo "Build IRIS module and install it into the IRIS containers."
    echo
-   echo "Syntax: $0 [-a|h][-w NAME][-p NAME]"
+   echo "Syntax: $0 [-a|h][-w NAME][-p NAME][-n NAME]"
    echo "options:"
    echo " -a         Also install to the app container (required on first install or config changes)"
    echo " -w NAME    Worker container name (default: iriswebapp_worker)"
    echo " -p NAME    App container name (default: iriswebapp_app)"
+   echo " -n NAME    Nginx container name (default: iriswebapp_nginx)"
    echo " -h         Print this help"
    echo
 }
@@ -90,12 +91,13 @@ worker_container_name="iriswebapp_worker"
 app_container_name="iriswebapp_app"
 nginx_container_name="iriswebapp_nginx"
 
-while getopts ":haw:p:" option; do
+while getopts ":haw:p:n:" option; do
    case $option in
       h) Help; exit;;
       a) a_Flag=true;;
       w) worker_container_name=$OPTARG;;
       p) app_container_name=$OPTARG;;
+      n) nginx_container_name=$OPTARG;;
       \?) echo "ERROR: Invalid option"; exit 1;;
       :) echo "ERROR: Option -$OPTARG requires an argument."; exit 1;;
    esac
