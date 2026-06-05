@@ -9,6 +9,7 @@ An [IRIS](https://github.com/dfir-iris/iris-web) processor module that pushes IO
 - Writes an enrichment tab to each IOC with score, labels, indicators, ATT&CK context, sightings, and containers fetched from OpenCTI
 - Maps 30+ IRIS IOC types to STIX observables; unsupported types are skipped and tagged `opencti:failed`
 - Adds per-IOC custom fields (**OpenCTI Description**, **OpenCTI Confidence Score**) so analysts control exactly what is shared with OpenCTI
+- Compatible with IRIS 2.4.x and 2.5.x case linkage models
 
 ## Requirements
 
@@ -26,11 +27,13 @@ An [IRIS](https://github.com/dfir-iris/iris-web) processor module that pushes IO
 ```bash
 git clone https://github.com/baseVISION/iris-opencti-module.git
 cd iris-opencti-module
-bash buildnpush2iris.sh        # installs into worker container and restarts it
-bash buildnpush2iris.sh -a     # also installs into app container (required on first install)
+bash buildnpush2iris.sh                      # installs into worker container and restarts it
+bash buildnpush2iris.sh -a                   # also installs into app container (required on first install)
+bash buildnpush2iris.sh -n <nginx-name>      # use a custom nginx container name
+bash buildnpush2iris.sh -a -n <nginx-name>   # worker + app install, custom nginx name
 ```
 
-The script builds the wheel, copies it into the running IRIS containers via Podman/Docker, installs `pycti` if not already present, and restarts the worker.
+The script builds the wheel, copies it into the running IRIS containers via Podman/Docker, installs `pycti` if not already present, and restarts the worker and nginx container.
 
 ### Manual installation
 
@@ -117,8 +120,8 @@ All settings are in the IRIS UI under **Manage → Modules → IrisOpenCTI**.
 
 | Parameter | Default |
 |---|---|
-| Push on IOC create | `true` |
-| Push on IOC update | `true` |
+| Push on IOC create | `false` |
+| Push on IOC update | `false` |
 | Manual push button ("Sync to OpenCTI") | `true` |
 | Push on IOC delete | `false` |
 
@@ -200,23 +203,6 @@ Integration tests run automatically when pycti is installed and OpenCTI is reach
 ```bash
 export OPENCTI_URL=http://localhost:8080
 export OPENCTI_TOKEN=<your-api-key>
-```
-
-### Project structure
-
-```
-buildnpush2iris.sh                     # Build wheel + deploy to local containers (Podman/Docker)
-iris_opencti_module/
-├── __init__.py
-├── IrisOpenCTIConfig.py           # Configuration schema (19 params)
-├── IrisOpenCTIInterface.py        # Hook registration and dispatch
-└── opencti_handler/
-    ├── opencti_handler.py         # 7-step IOC push pipeline
-    ├── opencti_client.py          # pycti wrapper (observables, cases, enrichment)
-    ├── ioc_type_mapping.py        # IOC type → STIX observable mapping
-    └── enrichment_renderer.py     # HTML renderer for the enrichment tab
-scripts/
-└── seed_opencti_testdata.py       # Populate OpenCTI with test threat intel data
 ```
 
 ## License
