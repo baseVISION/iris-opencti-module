@@ -105,36 +105,34 @@ _THREAT_CONTEXT_QUERY = """
 """
 
 _SIGHTINGS_QUERY = """
-    query Sightings($id: String!) {
-        stixCoreObject(id: $id) {
-            stixSightingRelationships(first: 50) {
-                edges {
-                    node {
-                        id
-                        first_seen
-                        last_seen
-                        attribute_count
-                        description
-                        createdBy {
+    query Sightings($id: StixRef!) {
+        stixSightingRelationships(fromId: $id, first: 50) {
+            edges {
+                node {
+                    id
+                    first_seen
+                    last_seen
+                    attribute_count
+                    description
+                    createdBy {
+                        ... on Identity { name }
+                    }
+                    from {
+                        ... on StixDomainObject {
+                            id
+                            entity_type
                             ... on Identity { name }
+                            ... on ThreatActor { name }
+                            ... on IntrusionSet { name }
                         }
-                        from {
-                            ... on StixDomainObject {
-                                id
-                                entity_type
-                                ... on Identity { name }
-                                ... on ThreatActor { name }
-                                ... on IntrusionSet { name }
-                            }
-                        }
-                        to {
-                            ... on StixDomainObject {
-                                id
-                                entity_type
-                                ... on Identity { name }
-                                ... on ThreatActor { name }
-                                ... on IntrusionSet { name }
-                            }
+                    }
+                    to {
+                        ... on StixDomainObject {
+                            id
+                            entity_type
+                            ... on Identity { name }
+                            ... on ThreatActor { name }
+                            ... on IntrusionSet { name }
                         }
                     }
                 }
@@ -531,11 +529,23 @@ class OpenCTIClient:
     def _fetch_sightings(self, entity_id: str) -> list[dict[str, str]]:
         """
         Fetch sighting relationships for an observable.
+
+        OpenCTI 6.x exposes sightings via a root-level
+        ``stixSightingRelationships(fromId: $id)`` query rather than
+        nested under ``stixCoreObject``.
         """
-        edges = self._query_edges(
-            _SIGHTINGS_QUERY, entity_id,
-            "stixSightingRelationships", "sightings",
-        )
+        try:
+            data = self.api.query(_SIGHTINGS_QUERY, {"id": entity_id})
+            edges = (
+                data.get("data", {})
+                .get("stixSightingRelationships", {})
+                .get("edges", [])
+            )
+        except Exception as exc:
+            self.log.warning(
+                "Failed to fetch sightings for %s: %s", entity_id, exc,
+            )
+            return []
 
         sightings: list[dict[str, str]] = []
         for edge in edges:

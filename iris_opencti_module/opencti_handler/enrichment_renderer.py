@@ -43,43 +43,23 @@ _THREAT_SECTIONS = [
     ("attack_patterns", "ATT&CK Techniques", "#283593", "techniques/attack_patterns"),
 ]
 
-_CSS = (
-    '<style>'
-    '.octi-tbl{border-collapse:collapse;width:100%;margin-bottom:12px}'
-    '.octi-tbl td,.octi-tbl th{padding:4px 8px;border:1px solid #ddd;'
-    'text-align:left;vertical-align:top}'
-    '.octi-tbl th{background:#f5f5f5;width:160px}'
-    '.octi-hdr{background:#1a237e;color:#fff;padding:6px 10px;'
-    'margin:0 0 2px 0;font-size:14px}'
-    '.octi-badge{display:inline-block;padding:2px 8px;'
-    'border-radius:10px;font-size:12px;margin:1px 2px;color:#fff}'
-    '.octi-score{font-weight:bold;font-size:16px}'
-    '.octi-pattern{font-family:monospace;font-size:11px;'
-    'background:#f8f8f8;padding:4px 6px;display:block;'
-    'word-break:break-all;margin:2px 0}'
-    '.octi-ref{margin:2px 0}'
-    '.octi-threat{display:inline-block;padding:2px 8px;'
-    'border-radius:4px;font-size:12px;margin:1px 2px;'
-    'background:#263238;color:#fff}'
-    '.octi-mitre{font-family:monospace;font-size:11px;'
-    'color:#b39ddb;margin-right:4px}'
-    '.octi-sighting{margin:2px 0;padding:2px 0;'
-    'border-bottom:1px solid #eee;font-size:12px}'
-    '</style>'
-)
+# No custom <style> block — IRIS 2.5.x strips <style> tags via bleach but
+# leaves the text content as visible raw CSS.  All styling uses Bootstrap 4
+# utility classes (allowed by the sanitizer's 'class' whitelist) and the
+# built-in semantic HTML elements that carry browser-default styling.
 
 
 # ── Small helpers ───────────────────────────────────────────────
 
-def _score_color(score: int | None) -> str:
-    """Return a CSS colour for an OpenCTI score (0-100)."""
+def _score_text_class(score: int | None) -> str:
+    """Return a Bootstrap 4 text-colour utility class for an OpenCTI score."""
     if score is None:
-        return "#999"
+        return "text-muted"
     if score >= 70:
-        return "#d32f2f"  # red — high
+        return "text-danger"   # red — high
     if score >= 40:
-        return "#f57c00"  # orange — medium
-    return "#388e3c"      # green — low
+        return "text-warning"  # orange — medium
+    return "text-success"      # green — low
 
 
 def _is_safe_url(url: str) -> bool:
@@ -115,8 +95,7 @@ def render_enrichment_html(
     indicators (STIX patterns / YARA), and external references.
     """
     parts = [
-        _CSS,
-        '<div class="octi-hdr">&#x1F50D; OpenCTI Sync Summary</div>',
+        '<h6 class="border-bottom pb-1 mb-2 font-weight-bold">&#x1F50D; OpenCTI Sync Summary</h6>',
         _render_summary_table(enrichments, case_names, tlp_name, synced_at),
     ]
 
@@ -130,8 +109,17 @@ def render_enrichment_html(
 
     return "\n".join(parts)
 
-
-# ── Summary table ───────────────────────────────────────────────
+def _rows_html(rows: list[tuple[str, str]]) -> str:
+    """Render key/value pairs as compact Bootstrap grid rows."""
+    parts = []
+    for lbl, val in rows:
+        parts.append(
+            f'<div class="row no-gutters border-bottom py-1 small">'
+            f'<div class="col-3 font-weight-bold text-muted">{lbl}</div>'
+            f'<div class="col-9">{val}</div>'
+            f'</div>'
+        )
+    return "\n".join(parts)
 
 def _render_summary_table(
     enrichments: list[dict],
@@ -159,10 +147,8 @@ def _render_summary_table(
         f"<strong>{len(enrichments)}</strong> created / updated",
     ))
 
-    rows_html = "\n".join(
-        f'<tr><th>{lbl}</th><td>{val}</td></tr>' for lbl, val in rows
-    )
-    return f'<table class="octi-tbl"><tbody>{rows_html}</tbody></table>'
+    rows_html = _rows_html(rows)
+    return f'<div class="mb-2">{rows_html}</div>'
 
 
 # ── Per-observable card ─────────────────────────────────────────
@@ -200,10 +186,10 @@ def _render_observable_card(obs: dict, index: int, opencti_url: str) -> str:
 
     # Score badge
     if score is not None:
-        color = _score_color(score)
+        score_cls = _score_text_class(score)
         detail_rows.append((
             "Score",
-            f'<span class="octi-score" style="color:{color}">{score}/100</span>',
+            f'<span class="font-weight-bold h5 {score_cls}">{score}/100</span>',
         ))
 
     # Description
@@ -222,8 +208,7 @@ def _render_observable_card(obs: dict, index: int, opencti_url: str) -> str:
     # Labels
     if labels:
         label_html = " ".join(
-            f'<span class="octi-badge" '
-            f'style="background:{_esc(lb.get("color", "#555"))}">{_esc(lb.get("value", ""))}</span>'
+            f'<span class="badge badge-secondary">{_esc(lb.get("value", ""))}</span>'
             for lb in labels
             if lb.get("value")
         )
@@ -270,12 +255,10 @@ def _render_observable_card(obs: dict, index: int, opencti_url: str) -> str:
             f"<code>{_esc(obs_id)}</code> <em>(details unavailable)</em>",
         ))
 
-    rows_html = "\n".join(
-        f'<tr><th>{lbl}</th><td>{val}</td></tr>' for lbl, val in detail_rows
-    )
+    rows_html = _rows_html(detail_rows)
     return (
-        f'<div class="octi-hdr">{title_html}</div>\n'
-        f'<table class="octi-tbl"><tbody>{rows_html}</tbody></table>'
+        f'<h6 class="border-bottom pb-1 mb-1 mt-2 font-weight-bold">{title_html}</h6>\n'
+        f'<div class="mb-2">{rows_html}</div>'
     )
 
 
@@ -289,7 +272,7 @@ def _render_indicators(indicators: list[dict]) -> str:
         pattern = _esc(ind.get("pattern", ""))
         if pattern:
             parts.append(
-                f'<span class="octi-pattern">[{ptype}] {pattern}</span>'
+                f'<code class="d-block">[{ptype}] {pattern}</code>'
             )
     return "\n".join(parts)
 
@@ -304,14 +287,14 @@ def _render_ext_refs(refs: list[dict]) -> str:
         label_text = _esc(source or ext_id or url)
         if url and _is_safe_url(url):
             parts.append(
-                f'<div class="octi-ref">'
+                f'<div class="mb-1">'
                 f'<a href="{_esc(url)}" target="_blank" '
                 f'rel="noopener noreferrer">{label_text}</a>'
-                f'{" (" + _esc(ext_id) + ")" if ext_id and source else ""}'
+                f'{": (" + _esc(ext_id) + ")" if ext_id and source else ""}'
                 f'</div>'
             )
         elif label_text:
-            parts.append(f'<div class="octi-ref">{label_text}</div>')
+            parts.append(f'<div class="mb-1">{label_text}</div>')
     return "\n".join(parts)
 
 
@@ -333,22 +316,21 @@ def _render_containers(containers: list[dict], opencti_url: str) -> str:
             if ctr_date else ""
         )
         type_badge = (
-            f'<span class="octi-badge" '
-            f'style="background:#455a64">{_esc(display_type)}</span> '
+            f'<span class="badge badge-secondary">{_esc(display_type)}</span> '
             if display_type else ""
         )
 
         if opencti_url and type_path and ctr_id:
             ctr_url = f"{opencti_url}/dashboard/{type_path}/{_esc(ctr_id)}"
             parts.append(
-                f'<div class="octi-ref">{type_badge}'
+                f'<div class="mb-1">{type_badge}'
                 f'<a href="{_esc(ctr_url)}" target="_blank" '
                 f'rel="noopener noreferrer">{label_text}</a>'
                 f'{date_suffix}</div>'
             )
         else:
             parts.append(
-                f'<div class="octi-ref">{type_badge}'
+                f'<div class="mb-1">{type_badge}'
                 f'{label_text}{date_suffix}</div>'
             )
     return "\n".join(parts)
@@ -367,26 +349,20 @@ def _render_threat_items(
         item_id = item.get("id", "")
         mitre_id = item.get("mitre_id", "")
         mitre_prefix = (
-            f'<span class="octi-mitre">{_esc(mitre_id)}</span>'
+            f'<code>{_esc(mitre_id)}</code> '
             if mitre_id else ""
         )
         if opencti_url and item_id:
             item_url = f"{opencti_url}/dashboard/{path}/{_esc(item_id)}"
             parts.append(
-                f'<div class="octi-ref">{mitre_prefix}'
-                f'<span class="octi-threat" '
-                f'style="background:{color}">'
+                f'<div class="mb-1">{mitre_prefix}'
                 f'<a href="{_esc(item_url)}" target="_blank" '
-                f'rel="noopener noreferrer" '
-                f'style="color:#fff;text-decoration:none">'
-                f'{item_name}</a></span></div>'
+                f'rel="noopener noreferrer">'
+                f'{item_name}</a></div>'
             )
         else:
             parts.append(
-                f'<div class="octi-ref">{mitre_prefix}'
-                f'<span class="octi-threat" '
-                f'style="background:{color}">'
-                f'{item_name}</span></div>'
+                f'<div class="mb-1">{mitre_prefix}{item_name}</div>'
             )
     return "\n".join(parts)
 
@@ -412,12 +388,11 @@ def _render_sightings(sightings: list[dict]) -> str:
                 f'from {_esc(first_seen[:10])}</span>'
             )
         count_badge = (
-            f' <span class="octi-badge" '
-            f'style="background:#37474f">{count}x</span>'
+            f' <span class="badge badge-secondary">{count}x</span>'
             if count and count != "1" else ""
         )
         parts.append(
-            f'<div class="octi-sighting">'
+            f'<div class="border-bottom py-1 small">'
             f'<strong>{source or "Unknown"}</strong>'
             f'{count_badge}{date_range}</div>'
         )

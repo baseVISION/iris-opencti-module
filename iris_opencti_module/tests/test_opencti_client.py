@@ -458,8 +458,8 @@ class TestGetObservableEnrichment:
                 "stixCoreObject": {
                     "containers": {"edges": []},
                     "stixCoreRelationships": {"edges": []},
-                    "stixSightingRelationships": {"edges": []},
-                }
+                },
+                "stixSightingRelationships": {"edges": []},
             }
         }
         client = _make_client(MockApi)
@@ -516,8 +516,8 @@ class TestGetObservableEnrichment:
                 "stixCoreObject": {
                     "containers": {"edges": []},
                     "stixCoreRelationships": {"edges": []},
-                    "stixSightingRelationships": {"edges": []},
-                }
+                },
+                "stixSightingRelationships": {"edges": []},
             }
         }
         client = _make_client(MockApi)
@@ -813,9 +813,7 @@ class TestFetchSightings:
         api = MockApi.return_value
         api.query.return_value = {
             "data": {
-                "stixCoreObject": {
-                    "stixSightingRelationships": {"edges": edges}
-                }
+                "stixSightingRelationships": {"edges": edges}
             }
         }
         return _make_client(MockApi)

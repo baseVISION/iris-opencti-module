@@ -443,7 +443,10 @@ class IrisOpenCTIInterface(IrisModuleInterface):
 
     def _lookup_cases_for_ioc(self, ioc: Any) -> list:
         """
-        Resolve ALL IRIS cases linked to an IOC via the IocLink table.
+        Resolve IRIS case(s) linked to an IOC.
+
+        IRIS 2.5.x+: ``case_id`` is a direct column on the ``ioc`` row.
+        IRIS ≤ 2.4.x: a separate ``IocLink`` join table was used.
 
         Returns a list of Cases objects (may be empty).
         """
@@ -452,23 +455,45 @@ class IrisOpenCTIInterface(IrisModuleInterface):
             return []
 
         try:
-            from app.models.models import IocLink
+            # IRIS 2.5.x: Cases moved to app.models.cases
+            # IRIS ≤ 2.4.x: Cases was in app.models.models
+            try:
+                from app.models.cases import Cases
+            except ImportError:
+                from app.models.models import Cases
 
-            links = IocLink.query.filter(
-                IocLink.ioc_id == ioc_id
-            ).all()
+            # IRIS 2.5.x+: case_id lives directly on the ioc row.
+            case_id = getattr(ioc, "case_id", None)
+            if case_id is not None:
+                case = Cases.query.filter_by(case_id=case_id).first()
+                if case:
+                    self.log.info(
+                        "IOC %s is linked to case %s", ioc_id, case_id
+                    )
+                    return [case]
+                return []
 
-            cases = [link.case for link in links if link.case]
-            if cases:
-                self.log.info(
-                    "IOC %s is linked to %d case(s): %s",
+            # IRIS ≤ 2.4.x fallback: separate IocLink join table.
+            try:
+                from app.models.models import IocLink
+                links = IocLink.query.filter(IocLink.ioc_id == ioc_id).all()
+                cases = [link.case for link in links if link.case]
+                if cases:
+                    self.log.info(
+                        "IOC %s is linked to %d case(s): %s",
+                        ioc_id,
+                        len(cases),
+                        ", ".join(str(getattr(c, "case_id", "?")) for c in cases),
+                    )
+                return cases
+            except ImportError:
+                self.log.debug(
+                    "IocLink not available and ioc.case_id is None for IOC %s "
+                    "— no case association found",
                     ioc_id,
-                    len(cases),
-                    ", ".join(
-                        str(getattr(c, "case_id", "?")) for c in cases
-                    ),
                 )
-            return cases
+                return []
+
         except Exception as exc:
             # Log but don't crash — the IOC can still be pushed without
             # a case association.

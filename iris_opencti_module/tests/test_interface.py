@@ -504,6 +504,40 @@ class TestLookupCasesForIoc:
 
         assert result == []
 
+    def test_iris_25_direct_case_id_on_ioc(self):
+        """IRIS 2.5.x: case_id is a direct column on the ioc row."""
+        iface = _make_interface()
+        ioc = SimpleNamespace(ioc_id=36, case_id=21)
+
+        case = SimpleNamespace(case_id=21, name="My Case", description="")
+        mock_cases = MagicMock()
+        mock_cases.query.filter_by.return_value.first.return_value = case
+
+        mock_cases_module = MagicMock()
+        mock_cases_module.Cases = mock_cases
+
+        with patch.dict("sys.modules", {"app.models.cases": mock_cases_module}):
+            result = iface._lookup_cases_for_ioc(ioc)
+
+        assert result == [case]
+        mock_cases.query.filter_by.assert_called_once_with(case_id=21)
+
+    def test_iris_25_direct_case_id_not_found_returns_empty(self):
+        """IRIS 2.5.x: case_id set but the Cases row is missing (e.g. deleted)."""
+        iface = _make_interface()
+        ioc = SimpleNamespace(ioc_id=36, case_id=99)
+
+        mock_cases = MagicMock()
+        mock_cases.query.filter_by.return_value.first.return_value = None
+
+        mock_cases_module = MagicMock()
+        mock_cases_module.Cases = mock_cases
+
+        with patch.dict("sys.modules", {"app.models.cases": mock_cases_module}):
+            result = iface._lookup_cases_for_ioc(ioc)
+
+        assert result == []
+
     def test_ioc_link_db_unavailable_returns_empty(self):
         """If app.models.models can't be imported, return empty list gracefully."""
         iface = _make_interface()
