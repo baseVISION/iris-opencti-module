@@ -74,11 +74,30 @@ def ensure_ioc_attribute_exists(logger, confidence_default: int = 50) -> None:
             logger.info("Added OpenCTI tab to IOC custom attribute template")
         else:
             changed = False
+            # Add any fields that are entirely missing from the tab.
             for field_name, field_def in template.items():
                 if field_name not in content[ATTRIBUTE_TAB]:
                     content[ATTRIBUTE_TAB][field_name] = field_def
                     changed = True
                     logger.info("Added missing field '%s' to OpenCTI tab template", field_name)
+
+            # Keep the template confidence default in sync with the module setting.
+            # Only update when the field already existed — if it was just added by
+            # the loop above it already carries the correct value from `template`.
+            # This ensures the "Add IOC" modal shows the updated pre-fill after an
+            # admin changes opencti_confidence in the module settings.
+            if FIELD_CONFIDENCE in content[ATTRIBUTE_TAB]:
+                current_confidence = content[ATTRIBUTE_TAB][FIELD_CONFIDENCE].get("value")
+                new_confidence = template[FIELD_CONFIDENCE]["value"]
+                if current_confidence != new_confidence:
+                    content[ATTRIBUTE_TAB][FIELD_CONFIDENCE] = dict(content[ATTRIBUTE_TAB][FIELD_CONFIDENCE])
+                    content[ATTRIBUTE_TAB][FIELD_CONFIDENCE]["value"] = new_confidence
+                    changed = True
+                    logger.info(
+                        "Updated OpenCTI Confidence Score template default: %s → %s",
+                        current_confidence, new_confidence,
+                    )
+
             if changed:
                 ca.attribute_content = content
                 flag_modified(ca, "attribute_content")
